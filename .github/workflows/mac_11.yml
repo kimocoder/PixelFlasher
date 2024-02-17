@@ -27,14 +27,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: List Cellar directory Again
+      - name: Tap older Homebrew formula
+        run: |
+          brew tap homebrew/core https://github.com/Homebrew/homebrew-core.git
+          cd "$(brew --repo homebrew/core)"
+          git checkout 223f40334c8e01ee5a525e7cdc7b184f8c9c4a29
+
+      - name: List Cellar directory
         run: |
           ls /usr/local/Cellar
-
-      - name: Checkout older Homebrew
-        run: |
-          cd /usr/local/Homebrew
-          git checkout 223f40334c8e01ee5a525e7cdc7b184f8c9c4a29
 
       # - name: Uninstall Pythons other than 3.11
       #   run: |
