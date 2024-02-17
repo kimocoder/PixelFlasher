@@ -31,6 +31,12 @@ jobs:
         run: |
           ls /usr/local/Cellar
 
+      - name: Checkout older Homebrew
+        run: |
+          cd /usr/local/Homebrew
+          git fetch --unshallow
+          git checkout 223f40334c8e01ee5a525e7cdc7b184f8c9c4a29
+
       # - name: Uninstall Pythons other than 3.11
       #   run: |
       #     brew uninstall --ignore-dependencies python@3.10
@@ -46,10 +52,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install node graphicsmagick imagemagick
-        run: |
-          brew install --force-bottle node
-          brew install --force-bottle graphicsmagick
-          brew install --force-bottle imagemagick
+        run: brew install node graphicsmagick imagemagick
 
       - name: Install wxPython
         # run: brew install wxpython
