@@ -46,7 +46,10 @@ jobs:
           python-version: '3.12'
 
       - name: Install node graphicsmagick imagemagick
-        run: brew install node graphicsmagick imagemagick
+        run: |
+          brew install --force-bottle node
+          brew install --force-bottle graphicsmagick
+          brew install --force-bottle imagemagick
 
       - name: Install wxPython
         # run: brew install wxpython
