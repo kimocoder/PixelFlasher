@@ -29,7 +29,7 @@ jobs:
 
       - name: Tap older Homebrew formula
         run: |
-          brew tap homebrew/core https://github.com/Homebrew/homebrew-core.git
+          brew tap homebrew/core https://github.com/Homebrew/homebrew-core
           cd "$(brew --repo homebrew/core)"
           git checkout 223f40334c8e01ee5a525e7cdc7b184f8c9c4a29
 
