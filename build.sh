@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 rm -rf build dist
-VERSION=4.3.0.0
+VERSION=6.8.0.2
 NAME="PixelFlasher"
 DIST_NAME="PixelFlasher"
+
+pushd "$(dirname "$0")"
 
 if [[ $OSTYPE == 'darwin'* ]]; then
     echo "Building for MacOS"
@@ -14,7 +16,6 @@ fi
 
 pyinstaller --log-level=DEBUG \
             --noconfirm \
-            --windowed \
             $specfile
 
 if [[ $OSTYPE == 'darwin'* ]]; then
@@ -22,3 +23,5 @@ if [[ $OSTYPE == 'darwin'* ]]; then
     create-dmg "dist/$NAME.app"
     mv "$NAME $VERSION.dmg" "dist/$DIST_NAME.dmg"
 fi
+
+popd

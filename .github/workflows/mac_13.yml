@@ -1,0 +1,99 @@
+name: Build for MacOS 13
+
+env:
+  ACTIONS_RUNTIME_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+# Controls when the workflow will run
+on:
+  # push:
+    # # Sequence of patterns matched against refs/tags
+    # tags:
+    # - 'v*' # Push events to matching v*, i.e. v1.0, v20.15.10
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+    inputs:
+      tags:
+        description: 'Build tags'
+
+jobs:
+  build_mac_13:
+    if: ${{ github.actor == 'badabing2005' }}
+    # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners
+    # runs-on: macos-latest
+    runs-on: macos-13
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: List Cellar directory Again
+        run: |
+          ls /usr/local/Cellar
+
+      - name: Uninstall Pythons other than 3.11
+        run: |
+          brew uninstall --ignore-dependencies python@3.10
+          brew uninstall --ignore-dependencies python@3.12
+          echo "doing brew list"
+          brew list
+          echo "getting directory list for /usr/local/Cellar"
+          ls /usr/local/Cellar
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install wxPython
+        # run: brew install wxpython
+        run: pip install wxPython
+
+      - name: Install node graphicsmagick imagemagick
+        run: brew install node graphicsmagick imagemagick
+
+      - name: Install create-dmg
+        run: npm install --global create-dmg
+
+      - name: Add Python 3.11 to PATH
+        run: export PATH=/usr/local/Cellar/python@3.11/bin:$PATH
+
+      - name: Create virtual environment
+        run: python3.11 -m venv myenv
+        shell: bash
+
+      - name: Activate virtual environment
+        run: source myenv/bin/activate
+        shell: bash
+
+      - name: Install requirements
+        run: python3.11 -m pip install -r requirements.txt
+
+      - name: List modules and their versions
+        run: python3.11 -m pip freeze
+
+      - name: Build application
+        run: ./build.sh
+
+      - name: Rename the file
+        run: mv dist/PixelFlasher.dmg dist/PixelFlasher_MacOS_13.dmg
+
+      - name: Get sha256
+        run: |
+          shasum -a 256 dist/PixelFlasher_MacOS_13.dmg > dist/PixelFlasher_MacOS_13.dmg.sha256
+          cat dist/PixelFlasher_MacOS_13.dmg.sha256
+
+      - name: List contents of dist directory
+        run: ls dist
+
+      # Upload artifacts Mac-OS 13 to Actions
+      - name: Upload Mac-OS 13 Artifact
+        if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }} # Only run this step when running in GitHub Actions
+        uses: actions/upload-artifact@v4
+        id: upload_artifact_macos_13
+        with:
+          name: PixelFlasher_MacOS_13.dmg Artifacts
+          path: |
+            dist/PixelFlasher_MacOS_13.dmg
+            dist/PixelFlasher_MacOS_13.dmg.sha256
+

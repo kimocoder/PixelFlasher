@@ -6,7 +6,7 @@ import wx
 import wx.html
 import wx.lib.wxpTag
 import webbrowser
-from config import VERSION
+from constants import *
 from runtime import get_bundle_dir
 from runtime import check_latest_version
 from packaging.version import parse
@@ -16,7 +16,7 @@ class AboutDlg(wx.Dialog):
 <html>
 <body bgcolor="#DCDCDC" style="font-family: Arial; background-color: #DCDCDC;">
 <center>
-    <img src="{0}/images/icon-64.png" width="64" height="64" alt="PixelFlasher">
+    <img src="{0}/images/icon-dark-64.png" width="64" height="64" alt="PixelFlasher">
 
     <h1>PixelFlasher</h1>
     <p>By Badabing</p>
@@ -24,7 +24,7 @@ class AboutDlg(wx.Dialog):
 
     {2}
 
-    <p>Fork the <a style="color: #004CE5;" href="https://github.com/badabing2005/PixelFlasher">project on
+    <p>Fork the <a style="color: #004CE5;" href="https://github.com/badabing2005/PixelFlasher/fork">project on
     GitHub</a> and help improve it for all!</p>
 
     <p> Beware! </p>
