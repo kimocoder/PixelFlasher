@@ -34,7 +34,6 @@ jobs:
       - name: Checkout older Homebrew
         run: |
           cd /usr/local/Homebrew
-          git fetch --unshallow
           git checkout 223f40334c8e01ee5a525e7cdc7b184f8c9c4a29
 
       # - name: Uninstall Pythons other than 3.11
