@@ -1,25 +1,46 @@
+#
+# Copyright (C) 2025 Badabing2005
+# SPDX-FileCopyrightText: 2025 Badabing2005
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# This program is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, either version 3 of the License, or (at your option) any
+# later version.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License
+# for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+#
+# Also add information on how to contact you by electronic and paper mail.
+#
+# If your software can interact with users remotely through a computer network,
+# you should also make sure that it provides a way for users to get its source.
+# For example, if your program is a web application, its interface could
+# display a "Source" link that leads users to an archive of the code. There are
+# many ways you could offer source, and different solutions will be better for
+# different programs; see section 13 for the specific requirements.
+#
+# You should also get your employer (if you work as a programmer) or school, if
+# any, to sign a "copyright disclaimer" for the program, if necessary. For more
+# information on this, and how to apply and follow the GNU AGPL, see
+# <https://www.gnu.org/licenses/>.
+
 name: Build for Windows 2019
 
-env:
-  ACTIONS_RUNTIME_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-# Controls when the workflow will run
 on:
-  # push:
-    # # Sequence of patterns matched against refs/tags
-    # tags:
-    # - 'v*' # Push events to matching v*, i.e. v1.0, v20.15.10
-
-  # Allows you to run this workflow manually from the Actions tab
+  workflow_call:
   workflow_dispatch:
     inputs:
       tags:
         description: 'Build tags'
 
 jobs:
-  build_windows:
-    if: ${{ github.actor == 'badabing2005' }}
-    # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners
+  build_windows_2019:
     runs-on: windows-2019
 
     steps:
@@ -43,7 +64,7 @@ jobs:
         run: |
           python --version
           pip install -U six wheel setuptools
-          pip install -U -f https://extras.wxpython.org/wxPython4/extras/4.2.1 wxPython
+          pip install -U -f https://extras.wxpython.org/wxPython4/extras/4.2.2 wxPython
         shell: powershell
 
       - name: Install requirements
@@ -58,22 +79,35 @@ jobs:
       - name: Rename the file
         run: mv dist/PixelFlasher.exe dist/PixelFlasher_Win_2019.exe
 
+      - name: List contents of dist directory
+        run: ls dist
+
+      - name: Sign Windows Executable
+        uses: skymatic/code-sign-action@v3
+        with:
+          certificate: '${{ secrets.CERTIFICATE }}'
+          password: '${{ secrets.CERT_PASSWORD }}'
+          certificatesha1: '${{ secrets.CERTHASH }}'
+          certificatename: '${{ secrets.CERTNAME }}'
+          description: 'PixelFlasher'
+          timestampUrl: 'http://timestamp.digicert.com'
+          folder: 'dist'
+          recursive: false
+
       - name: Get sha256
         run: |
           certutil -hashfile dist/PixelFlasher_Win_2019.exe SHA256 > dist/PixelFlasher_Win_2019.exe.sha256
           cat dist/PixelFlasher_Win_2019.exe.sha256
 
-      - name: List contents of dist directory
+      - name: List contents of dist directory again
         run: ls dist
 
-      # Upload artifacts Windows to Actions
-      - name: Upload Windows Artifact
-        if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }} # Only run this step when running in GitHub Actions
+      # Upload artifacts Windows 2019
+      - name: Upload Windows 2019 Artifact
         uses: actions/upload-artifact@v4
-        id: upload_artifacts_windows
+        id: upload_artifacts_windows_2019
         with:
           name: PixelFlasher_Win_2019.exe Artifacts
           path: |
             dist/PixelFlasher_Win_2019.exe
             dist/PixelFlasher_Win_2019.exe.sha256
-

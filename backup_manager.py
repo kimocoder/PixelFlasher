@@ -1,5 +1,38 @@
 #!/usr/bin/env python
 
+# This file is part of PixelFlasher https://github.com/badabing2005/PixelFlasher
+#
+# Copyright (C) 2025 Badabing2005
+# SPDX-FileCopyrightText: 2025 Badabing2005
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# This program is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, either version 3 of the License, or (at your option) any
+# later version.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License
+# for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+#
+# Also add information on how to contact you by electronic and paper mail.
+#
+# If your software can interact with users remotely through a computer network,
+# you should also make sure that it provides a way for users to get its source.
+# For example, if your program is a web application, its interface could
+# display a "Source" link that leads users to an archive of the code. There are
+# many ways you could offer source, and different solutions will be better for
+# different programs; see section 13 for the specific requirements.
+#
+# You should also get your employer (if you work as a programmer) or school, if
+# any, to sign a "copyright disclaimer" for the program, if necessary. For more
+# information on this, and how to apply and follow the GNU AGPL, see
+# <https://www.gnu.org/licenses/>.
+
 import gzip
 import shutil
 
@@ -12,7 +45,7 @@ import wx.lib.wxpTag
 
 import images as images
 from runtime import *
-
+from i18n import _
 
 # ============================================================================
 #                               Class ListCtrl
@@ -29,13 +62,15 @@ class ListCtrl(wx.ListCtrl, listmix.ListCtrlAutoWidthMixin):
 class BackupManager(wx.Dialog, listmix.ColumnSorterMixin):
     def __init__(self, *args, **kwargs):
         wx.Dialog.__init__(self, *args, **kwargs, style = wx.RESIZE_BORDER | wx.DEFAULT_DIALOG_STYLE)
-        self.SetTitle("Magisk Backup Manager")
+        self.SetTitle(_("Magisk Backup Manager"))
         self.backupCount = 0
         self.all_cb_clicked = False
-        self.device = get_phone()
+        self.device = get_phone(True)
         if not self.device:
             print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: You must first select a valid device.")
-            return -1
+            wx.MessageBox(_("❌ ERROR: You must first select a valid device."), _("Error"), wx.OK | wx.ICON_ERROR)
+            self.Close()
+            return
 
         self.sha1 = self.device.magisk_sha1
         self.message_label = wx.StaticText(self, wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.DefaultSize, 0)
@@ -43,7 +78,7 @@ class BackupManager(wx.Dialog, listmix.ColumnSorterMixin):
         self.message_label.Label = self.sha1
         self.message_label.SetFont(wx.Font(12, wx.FONTFAMILY_SWISS, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_BOLD, False, "Arial"))
 
-        self.all_checkbox = wx.CheckBox(self, wx.ID_ANY, u"Check / Uncheck All", wx.DefaultPosition, wx.DefaultSize, style=wx.CHK_3STATE)
+        self.all_checkbox = wx.CheckBox(self, wx.ID_ANY, _("Check / Uncheck All"), wx.DefaultPosition, wx.DefaultSize, style=wx.CHK_3STATE)
 
         self.searchCtrl = wx.SearchCtrl(self, style=wx.TE_PROCESS_ENTER)
         self.searchCtrl.ShowCancelButton(True)
@@ -63,18 +98,18 @@ class BackupManager(wx.Dialog, listmix.ColumnSorterMixin):
             self.itemDataMap = itemDataMap
         listmix.ColumnSorterMixin.__init__(self, 6)
 
-        self.delete_button = wx.Button(self, wx.ID_ANY, u"Delete", wx.DefaultPosition, wx.DefaultSize, 0)
-        self.delete_button.SetToolTip(u"Delete checked backups")
+        self.delete_button = wx.Button(self, wx.ID_ANY, _("Delete"), wx.DefaultPosition, wx.DefaultSize, 0)
+        self.delete_button.SetToolTip(_("Delete checked backups"))
         self.delete_button.Enable(False)
 
-        self.add_backup_button = wx.Button(self, wx.ID_ANY, u"Add Backup from Computer", wx.DefaultPosition, wx.DefaultSize, 0)
-        self.add_backup_button.SetToolTip(u"Select a boot.img and create a backup from it.\nWARNING! No verification is done if the selected file is stock boot image or even for the correct device.")
+        self.add_backup_button = wx.Button(self, wx.ID_ANY, _("Add Backup from Computer"), wx.DefaultPosition, wx.DefaultSize, 0)
+        self.add_backup_button.SetToolTip(_("Select a boot.img and create a backup from it.\nWARNING! No verification is done if the selected file is stock boot image or even for the correct device."))
 
-        self.auto_backup_button = wx.Button(self, wx.ID_ANY, u"Auto Create Backup", wx.DefaultPosition, wx.DefaultSize, 0)
-        self.auto_backup_button.SetToolTip(u"Checks current boot partition,\nFf it is a Magisk Patched with SHA1\nand the boot.img is available, then it\nAutomatically creates a backup of boot image.")
+        self.auto_backup_button = wx.Button(self, wx.ID_ANY, _("Auto Create Backup"), wx.DefaultPosition, wx.DefaultSize, 0)
+        self.auto_backup_button.SetToolTip(_("Checks current boot partition,\nFf it is a Magisk Patched with SHA1\nand the boot.img is available, then it\nAutomatically creates a backup of boot image."))
 
-        self.close_button = wx.Button(self, wx.ID_ANY, u"Close", wx.DefaultPosition, wx.DefaultSize, 0)
-        self.close_button.SetToolTip(u"Closes this dialog")
+        self.close_button = wx.Button(self, wx.ID_ANY, _("Close"), wx.DefaultPosition, wx.DefaultSize, 0)
+        self.close_button.SetToolTip(_("Closes this dialog"))
 
         vSizer = wx.BoxSizer(wx.VERTICAL)
         message_sizer = wx.BoxSizer(wx.HORIZONTAL)
@@ -321,7 +356,7 @@ class BackupManager(wx.Dialog, listmix.ColumnSorterMixin):
     # -----------------------------------------------
     def OnAddBackup(self, e):
         print(f"{datetime.now():%Y-%m-%d %H:%M:%S} User Pressed on Add Backup")
-        with wx.FileDialog(self, "boot / init_boot image to create backup of.", '', '', wildcard="Images (*.*.img)|*.img", style=wx.FD_OPEN) as fileDialog:
+        with wx.FileDialog(self, _("boot / init_boot image to create backup of."), '', '', wildcard="Images (*.*.img)|*.img", style=wx.FD_OPEN) as fileDialog:
             if fileDialog.ShowModal() == wx.ID_CANCEL:
                 print("User cancelled backup creation.")
                 return
@@ -341,7 +376,7 @@ class BackupManager(wx.Dialog, listmix.ColumnSorterMixin):
                 print("Checking to see if Magisk made a backup.")
                 magisk_backups = self.device.magisk_backups
                 if magisk_backups and file_sha1 in magisk_backups:
-                    print("Good: Magisk has made a backup")
+                    print("✅ Good: Magisk has made a backup")
                 else:
                     print("It looks like Magisk did not make a backup.\nTrying an alternate approach ...")
                     self.ZipAndPush(file_to_backup, file_sha1)
@@ -369,7 +404,7 @@ class BackupManager(wx.Dialog, listmix.ColumnSorterMixin):
             with gzip.open(backup_file, 'wb', compresslevel=9) as f_out:
                 shutil.copyfileobj(f_in, f_out)
         if not os.path.exists(backup_file):
-            print(f"ERROR: Coud not create {backup_file}")
+            print(f"ERROR: Could not create {backup_file}")
             return -1
         # mkdir the directory with su
         res = self.device.create_dir(f"/data/magisk_backup_{file_sha1}", True)
@@ -435,7 +470,7 @@ class BackupManager(wx.Dialog, listmix.ColumnSorterMixin):
                 print("Checking to see if Magisk made a backup.")
                 magisk_backups = self.device.magisk_backups
                 if magisk_backups and patched_sha1 in magisk_backups:
-                    print("Good: Magisk has made a backup")
+                    print("✅ Good: Magisk has made a backup")
                 else:
                     print("It looks like Magisk did not make a backup.\nTrying an alternate approach ...")
                     self.ZipAndPush(file_to_backup, patched_sha1)
@@ -455,7 +490,7 @@ class BackupManager(wx.Dialog, listmix.ColumnSorterMixin):
                 return
         else:
             print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: The dumped partition does not contain source boot's SHA1")
-            print("This is normal for older devices, but newer deviced should have it.")
+            print("This is normal for older devices, but newer devices should have it.")
             print("Cannot create automatic backup file, you can still manually select and create one.")
             print("Aborting ...")
             return
@@ -561,11 +596,11 @@ class BackupManager(wx.Dialog, listmix.ColumnSorterMixin):
 
         # build the menu
         menu = wx.Menu()
-        menu.Append(self.popupDelete, "Delete Backup")
-        menu.Append(self.popupRefresh, "Refresh")
-        menu.Append(self.popupCheckAllBoxes, "Check All")
-        menu.Append(self.popupUnCheckAllBoxes, "UnCheck All")
-        menu.Append(self.popupCopyClipboard, "Copy to Clipboard")
+        menu.Append(self.popupDelete, _("Delete Backup"))
+        menu.Append(self.popupRefresh, _("Refresh"))
+        menu.Append(self.popupCheckAllBoxes, _("Check All"))
+        menu.Append(self.popupUnCheckAllBoxes, _("UnCheck All"))
+        menu.Append(self.popupCopyClipboard, _("Copy to Clipboard"))
 
         # Popup the menu.  If an item is selected then its handler
         # will be called before PopupMenu returns.

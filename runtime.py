@@ -1,5 +1,38 @@
 #!/usr/bin/env python
 
+# This file is part of PixelFlasher https://github.com/badabing2005/PixelFlasher
+#
+# Copyright (C) 2025 Badabing2005
+# SPDX-FileCopyrightText: 2025 Badabing2005
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# This program is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, either version 3 of the License, or (at your option) any
+# later version.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License
+# for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+#
+# Also add information on how to contact you by electronic and paper mail.
+#
+# If your software can interact with users remotely through a computer network,
+# you should also make sure that it provides a way for users to get its source.
+# For example, if your program is a web application, its interface could
+# display a "Source" link that leads users to an archive of the code. There are
+# many ways you could offer source, and different solutions will be better for
+# different programs; see section 13 for the specific requirements.
+#
+# You should also get your employer (if you work as a programmer) or school, if
+# any, to sign a "copyright disclaimer" for the program, if necessary. For more
+# information on this, and how to apply and follow the GNU AGPL, see
+# <https://www.gnu.org/licenses/>.
+
 import apk
 import binascii
 import contextlib
@@ -12,7 +45,6 @@ import json5
 import math
 import ntpath
 import os
-import platform
 import re
 import shutil
 import signal
@@ -22,82 +54,96 @@ import sys
 import random
 import tarfile
 import tempfile
+import threading
 import time
 import traceback
 import zipfile
 import psutil
 import xml.etree.ElementTree as ET
-from datetime import datetime
+import urllib3
+import warnings
+from datetime import datetime, timezone, timedelta
 from os import path
 from urllib.parse import urlparse
 import xml.etree.ElementTree as ET
 from bs4 import BeautifulSoup
 from cryptography import x509
-
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import padding, rsa, ec
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.backends import default_backend
+from i18n import _, set_language
 import lz4.frame
 import requests
 import wx
 from packaging.version import parse
 from platformdirs import *
 from constants import *
+from payload_dumper import extract_payload
 import cProfile, pstats, io
+import avbtool
 
-verbose = False
-adb = None
-fastboot = None
-adb_sha256 = None
-fastboot_sha256 = None
-phones = []
-device_list = []
-phone_id = None
-advanced_options = False
-update_check = True
-firmware_model = None
-firmware_id = None
-custom_rom_id = None
-logfile = None
-pumlfile = None
-sdk_version = None
-image_mode = None
-image_path = None
-custom_rom_file = None
-message_box_title = None
-message_box_message = None
-version = None
-db = None
-boot = None
-system_code_page = None
-codepage_setting = False
-codepage_value = ''
-magisk_package = ''
-file_explorer = ''
-linux_shell = ''
-patched_with = ''
-customize_font = False
-pf_font_face = ''
-pf_font_size = 12
-app_labels = {}
-xiaomi_list = {}
-favorite_pifs = {}
-a_only = False
-offer_patch_methods = False
-use_busybox_shell = False
-firmware_hash_valid = False
-firmware_has_init_boot = False
-rom_has_init_boot = False
-dlg_checkbox_values = None
-recovery_patch = False
-config_path = None
-android_versions = {}
-android_devices = {}
-env_variables = os.environ.copy()
-is_ota = False
-sdk_is_ok = False
-low_memory = False
-config = {}
-config_file_path = ''
-unlocked_devices = []
-window_shown = False
+app_language = 'en'  # Default language is English
+_verbose = False
+_adb = None
+_fastboot = None
+_adb_sha256 = None
+_fastboot_sha256 = None
+_phones = []
+_device_list = []
+_phone_id = None
+# _advanced_options = False
+# _update_check = True
+_firmware_model = None
+_firmware_id = None
+_custom_rom_id = None
+_logfile = None
+_pumlfile = None
+_sdk_version = None
+_image_mode = None
+_image_path = None
+_custom_rom_file = None
+_message_box_title = None
+_message_box_message = None
+# _version = None
+_db = None
+_boot = None
+_system_code_page = None
+# _codepage_setting = False
+# _codepage_value = ''
+_magisk_package = ''
+# _file_explorer = ''
+_linux_shell = ''
+_patched_with = ''
+# _customize_font = False
+# _pf_font_face = ''
+# _pf_font_size = 12
+_app_labels = {}
+_xiaomi_list = {}
+_favorite_pifs = {}
+_a_only = False
+# _offer_patch_methods = False
+# _use_busybox_shell = False
+_firmware_hash_valid = False
+_firmware_has_init_boot = False
+_rom_has_init_boot = False
+_dlg_checkbox_values = None
+# _recovery_patch = False
+_config_path = None
+_android_versions = {}
+_android_devices = {}
+_env_variables = os.environ.copy()
+_is_ota = False
+_sdk_is_ok = False
+_low_memory = False
+_config = {}
+_config_file_path = ''
+_unlocked_devices = []
+_window_shown = False
+_puml_enabled = True
+_magisk_apks = None
+
 
 # ============================================================================
 #                               Class Boot
@@ -122,6 +168,24 @@ class Boot():
         self.is_stock_boot = None
         self.is_init_boot = None
         self.patch_source_sha1 = None
+        self.spl = None
+        self.fingerprint = None
+
+
+# ============================================================================
+#                               Class BetaData
+# ============================================================================
+class BetaData:
+    def __init__(self, release_date, build, emulator_support, security_patch_level, google_play_services, beta_expiry_date, incremental, security_patch, devices):
+        self.release_date = release_date
+        self.build = build
+        self.emulator_support = emulator_support
+        self.security_patch_level = security_patch_level
+        self.google_play_services = google_play_services
+        self.beta_expiry_date = beta_expiry_date
+        self.incremental = incremental
+        self.security_patch = security_patch
+        self.devices = devices
 
 
 # ============================================================================
@@ -177,75 +241,117 @@ class ModuleUpdate():
 
 
 # ============================================================================
+#                               Class MagiskApk
+# ============================================================================
+class MagiskApk():
+    def __init__(self, type):
+        self.type = type
+
+
+# ============================================================================
+#                               Function get_app_language
+# ============================================================================
+def get_app_language():
+    global _app_language
+    return _app_language
+
+
+# ============================================================================
+#                               Function set_app_language
+# ============================================================================
+def set_app_language(value):
+    global _app_language
+    _app_language = value
+    # Update the actual translation system
+    set_language(value)
+
+# ============================================================================
 #                               Function get_config
 # ============================================================================
 def get_config():
-    global config
-    return config
+    global _config
+    return _config
 
 
 # ============================================================================
 #                               Function set_config
 # ============================================================================
 def set_config(value):
-    global config
-    config = value
+    global _config
+    _config = value
+
 
 # ============================================================================
 #                               Function get_window_shown
 # ============================================================================
 def get_window_shown():
-    global window_shown
-    return window_shown
+    global _window_shown
+    return _window_shown
+
 
 # ============================================================================
 #                               Function set_window_shown
 # ============================================================================
 def set_window_shown(value):
-    global window_shown
-    window_shown = value
+    global _window_shown
+    _window_shown = value
+
 
 # ============================================================================
 #                               Function check_for_unlocked
 # ============================================================================
 def check_for_unlocked(item):
-    return item in unlocked_devices
+    global _unlocked_devices
+    if item in _unlocked_devices:
+        return True
+    else:
+        return False
 
 
 # ============================================================================
 #                               Function add_unlocked_device
 # ============================================================================
 def add_unlocked_device(item):
-    if item not in unlocked_devices:
-        unlocked_devices.append(item)
+    global _unlocked_devices
+    if item not in _unlocked_devices:
+        _unlocked_devices.append(item)
 
 
 # ============================================================================
 #                               Function remove_unlocked_device
 # ============================================================================
 def remove_unlocked_device(item):
-    if item in unlocked_devices:
-        unlocked_devices.remove(item)
+    global _unlocked_devices
+    if item in _unlocked_devices:
+        _unlocked_devices.remove(item)
+
+
+# ============================================================================
+#                               Function get_unlocked_device
+# ============================================================================
+def get_unlocked_device():
+    global _unlocked_devices
+    return _unlocked_devices
 
 
 # ============================================================================
 #                               Function set_console_widget
 # ============================================================================
 def set_console_widget(widget):
-    global console_widget
-    console_widget = widget
+    global _console_widget
+    _console_widget = widget
 
 
 # ============================================================================
 #                               Function flush_output
 # ============================================================================
 def flush_output():
-    global console_widget
+    global _console_widget
     if get_window_shown():
         wx.YieldIfNeeded()
-    if console_widget:
+    if _console_widget:
         sys.stdout.flush()
-        wx.CallAfter(console_widget.Update)
+        wx.CallAfter(_console_widget.Update)
         if get_window_shown():
             wx.YieldIfNeeded()
 
@@ -254,160 +360,160 @@ def flush_output():
 #                               Function get_boot
 # ============================================================================
 def get_boot():
-    global boot
-    return boot
+    global _boot
+    return _boot
 
 
 # ============================================================================
 #                               Function set_boot
 # ============================================================================
 def set_boot(value):
-    global boot
-    boot = value
+    global _boot
+    _boot = value
 
 
 # ============================================================================
 #                               Function get_labels
 # ============================================================================
 def get_labels():
-    global app_labels
-    return app_labels
+    global _app_labels
+    return _app_labels
 
 
 # ============================================================================
 #                               Function set_labels
 # ============================================================================
 def set_labels(value):
-    global app_labels
-    app_labels = value
+    global _app_labels
+    _app_labels = value
 
 
 # ============================================================================
 #                               Function get_xiaomi
 # ============================================================================
 def get_xiaomi():
-    global xiaomi_list
-    return xiaomi_list
+    global _xiaomi_list
+    return _xiaomi_list
 
 
 # ============================================================================
 #                               Function set_xiaomi
 # ============================================================================
 def set_xiaomi(value):
-    global xiaomi_list
-    xiaomi_list = value
+    global _xiaomi_list
+    _xiaomi_list = value
 
 
 # ============================================================================
 #                               Function get_favorite_pifs
 # ============================================================================
 def get_favorite_pifs():
-    global favorite_pifs
-    return favorite_pifs
+    global _favorite_pifs
+    return _favorite_pifs
 
 
 # ============================================================================
 #                               Function set_favorite_pifs
 # ============================================================================
 def set_favorite_pifs(value):
-    global favorite_pifs
-    favorite_pifs = value
+    global _favorite_pifs
+    _favorite_pifs = value
 
 
 # ============================================================================
 #                               Function get_low_memory
 # ============================================================================
 def get_low_memory():
-    global low_memory
-    return low_memory
+    global _low_memory
+    return _low_memory
 
 
 # ============================================================================
 #                               Function set_low_memory
 # ============================================================================
 def set_low_memory(value):
-    global low_memory
-    low_memory = value
+    global _low_memory
+    _low_memory = value
 
 
 # ============================================================================
 #                               Function get_android_versions
 # ============================================================================
 def get_android_versions():
-    global android_versions
-    return android_versions
+    global _android_versions
+    return _android_versions
 
 
 # ============================================================================
 #                               Function set_android_versions
 # ============================================================================
 def set_android_versions(value):
-    global android_versions
-    android_versions = value
+    global _android_versions
+    _android_versions = value
 
 
 # ============================================================================
 #                               Function get_android_devices
 # ============================================================================
 def get_android_devices():
-    global android_devices
-    return android_devices
+    global _android_devices
+    return _android_devices
 
 
 # ============================================================================
 #                               Function set_android_devices
 # ============================================================================
 def set_android_devices(value):
-    global android_devices
-    android_devices = value
+    global _android_devices
+    _android_devices = value
 
 
 # ============================================================================
 #                               Function get_env_variables
 # ============================================================================
 def get_env_variables():
-    global env_variables
-    return env_variables
+    global _env_variables
+    return _env_variables
 
 
 # ============================================================================
 #                               Function set_env_variables
 # ============================================================================
 def set_env_variables(value):
-    global env_variables
-    env_variables = value
+    global _env_variables
+    _env_variables = value
 
 
 # ============================================================================
 #                               Function get_patched_with
 # ============================================================================
 def get_patched_with():
-    global patched_with
-    return patched_with
+    global _patched_with
+    return _patched_with
 
 
 # ============================================================================
 #                               Function set_patched_with
 # ============================================================================
 def set_patched_with(value):
-    global patched_with
-    patched_with = value
+    global _patched_with
+    _patched_with = value
 
 
 # ============================================================================
 #                               Function get_db
 # ============================================================================
 def get_db():
-    global db
-    return db
+    global _db
+    return _db
 
 
 # ============================================================================
 #                               Function set_db
 # ============================================================================
 def set_db(value):
-    global db
-    db = value
+    global _db
+    _db = value
 
 
 # ============================================================================
@@ -439,165 +545,184 @@ def get_pf_db():
     # we have different db schemas for each of these versions
     if parse(VERSION) < parse('4.0.0'):
         return 'PixelFlasher.db'
-    elif parse(VERSION) < parse('9.0.0'):
+    elif parse(VERSION) < parse('99.0.0'):
         return 'PixelFlasher4.db'
     else:
-        return 'PixelFlasher9.db'
+        return 'PixelFlasher99.db'
 
 
 # ============================================================================
 #                               Function get_verbose
 # ============================================================================
 def get_verbose():
-    global verbose
-    return verbose
+    global _verbose
+    return _verbose
 
 
 # ============================================================================
 #                               Function set_verbose
 # ============================================================================
 def set_verbose(value):
-    global verbose
-    verbose = value
+    global _verbose
+    _verbose = value
 
 
 # ============================================================================
 #                               Function get_a_only
 # ============================================================================
 def get_a_only():
-    global a_only
-    return a_only
+    global _a_only
+    return _a_only
 
 
 # ============================================================================
 #                               Function set_a_only
 # ============================================================================
 def set_a_only(value):
-    global a_only
-    a_only = value
+    global _a_only
+    _a_only = value
 
 
 # ============================================================================
 #                               Function get_adb
 # ============================================================================
 def get_adb():
-    global adb
-    return adb
+    global _adb
+    return _adb
 
 
 # ============================================================================
 #                               Function set_adb
 # ============================================================================
 def set_adb(value):
-    global adb
-    adb = value
+    global _adb
+    _adb = value
+
+
+# ============================================================================
+#                               Function get_puml_state
+# ============================================================================
+def get_puml_state():
+    global _puml_enabled
+    return _puml_enabled
+
+
+# ============================================================================
+#                               Function set_puml_state
+# ============================================================================
+def set_puml_state(value):
+    global _puml_enabled
+    _puml_enabled = value
 
 
 # ============================================================================
 #                               Function get_fastboot
 # ============================================================================
 def get_fastboot():
-    global fastboot
-    return fastboot
+    global _fastboot
+    return _fastboot
 
 
 # ============================================================================
 #                               Function set_fastboot
 # ============================================================================
 def set_fastboot(value):
-    global fastboot
-    fastboot = value
+    global _fastboot
+    _fastboot = value
 
 
 # ============================================================================
 #                               Function get_adb_sha256
 # ============================================================================
 def get_adb_sha256():
-    global adb_sha256
-    return adb_sha256
+    global _adb_sha256
+    return _adb_sha256
 
 
 # ============================================================================
 #                               Function set_adb_sha256
 # ============================================================================
 def set_adb_sha256(value):
-    global adb_sha256
-    adb_sha256 = value
+    global _adb_sha256
+    _adb_sha256 = value
 
 
 # ============================================================================
 #                               Function get_fastboot_sha256
 # ============================================================================
 def get_fastboot_sha256():
-    global fastboot_sha256
-    return fastboot_sha256
+    global _fastboot_sha256
+    return _fastboot_sha256
 
 
 # ============================================================================
 #                               Function set_fastboot_sha256
 # ============================================================================
 def set_fastboot_sha256(value):
-    global fastboot_sha256
-    fastboot_sha256 = value
+    global _fastboot_sha256
+    _fastboot_sha256 = value
 
 
 # ============================================================================
 #                               Function get_phones
 # ============================================================================
 def get_phones():
-    global phones
-    return phones
+    global _phones
+    return _phones
 
 
 # ============================================================================
 #                               Function set_phones
 # ============================================================================
 def set_phones(value):
-    global phones
-    phones = value
+    global _phones
+    _phones = value
 
 
 # ============================================================================
 #                               Function get_device_list
 # ============================================================================
 def get_device_list():
-    global device_list
-    return device_list
+    global _device_list
+    return _device_list
 
 
 # ============================================================================
 #                               Function set_device_list
 # ============================================================================
 def set_device_list(value):
-    global device_list
-    device_list = value
+    global _device_list
+    _device_list = value
 
 
 # ============================================================================
 #                               Function get_phone_id
 # ============================================================================
 def get_phone_id():
-    global phone_id
-    return phone_id
+    global _phone_id
+    return _phone_id
 
 
 # ============================================================================
 #                               Function set_phone_id
 # ============================================================================
 def set_phone_id(value):
-    global phone_id
-    phone_id = value
+    global _phone_id
+    _phone_id = value
 
 
 # ============================================================================
 #                               Function get_phone
 # ============================================================================
-def get_phone():
+def get_phone(make_sure_connected=False):
     devices = get_phones()
     phone_id = get_phone_id()
     if phone_id and devices:
         for phone in devices:
             if phone.id == phone_id:
+                if make_sure_connected and not phone.is_connected(phone_id):
+                    print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Device: {phone_id} is not connected.")
+                    return None
                 return phone
 
 
@@ -605,64 +730,64 @@ def get_phone():
 #                               Function get_system_codepage
 # ============================================================================
 def get_system_codepage():
-    global system_code_page
-    return system_code_page
+    global _system_code_page
+    return _system_code_page
 
 
 # ============================================================================
 #                               Function set_system_codepage
 # ============================================================================
 def set_system_codepage(value):
-    global system_code_page
-    system_code_page = value
+    global _system_code_page
+    _system_code_page = value
 
 
 # ============================================================================
 #                               Function get_magisk_package
 # ============================================================================
 def get_magisk_package():
-    global magisk_package
-    return magisk_package
+    global _magisk_package
+    return _magisk_package
 
 
 # ============================================================================
 #                               Function set_magisk_package
 # ============================================================================
 def set_magisk_package(value):
-    global magisk_package
-    magisk_package = value
+    global _magisk_package
+    _magisk_package = value
 
 
 # ============================================================================
 #                               Function get_linux_shell
 # ============================================================================
 def get_linux_shell():
-    global linux_shell
-    return linux_shell
+    global _linux_shell
+    return _linux_shell
 
 
 # ============================================================================
 #                               Function set_linux_shell
 # ============================================================================
 def set_linux_shell(value):
-    global linux_shell
-    linux_shell = value
+    global _linux_shell
+    _linux_shell = value
 
 
 # ============================================================================
 #                               Function get_is_ota
 # ============================================================================
 def get_ota():
-    global is_ota
-    return is_ota
+    global _is_ota
+    return _is_ota
 
 
 # ============================================================================
-#                               Function set_is_ota
+#                               Function set_ota
 # ============================================================================
 def set_ota(self, value):
-    global is_ota
-    is_ota = value
+    global _is_ota
+    _is_ota = value
     self.config.firmware_is_ota = value
     if value:
         self.enable_disable_radio_button('OTA', True, selected=True, just_select=True)
@@ -676,266 +801,285 @@ def set_ota(self, value):
 #                               Function get_sdk_state
 # ============================================================================
 def get_sdk_state():
-    global sdk_is_ok
-    return sdk_is_ok
+    global _sdk_is_ok
+    return _sdk_is_ok
 
 
 # ============================================================================
 #                               Function set_sdk_state
 # ============================================================================
 def set_sdk_state(value):
-    global sdk_is_ok
-    sdk_is_ok = value
+    global _sdk_is_ok
+    _sdk_is_ok = value
 
 
 # ============================================================================
 #                               Function get_firmware_hash_validity
 # ============================================================================
 def get_firmware_hash_validity():
-    global firmware_hash_valid
-    return firmware_hash_valid
+    global _firmware_hash_valid
+    return _firmware_hash_valid
 
 
 # ============================================================================
 #                               Function set_firmware_hash_validity
 # ============================================================================
 def set_firmware_hash_validity(value):
-    global firmware_hash_valid
-    firmware_hash_valid = value
+    global _firmware_hash_valid
+    _firmware_hash_valid = value
 
 
 # ============================================================================
 #                               Function get_firmware_has_init_boot
 # ============================================================================
 def get_firmware_has_init_boot():
-    global firmware_has_init_boot
-    return firmware_has_init_boot
+    global _firmware_has_init_boot
+    return _firmware_has_init_boot
 
 
 # ============================================================================
 #                               Function set_firmware_has_init_boot
 # ============================================================================
 def set_firmware_has_init_boot(value):
-    global firmware_has_init_boot
-    firmware_has_init_boot = value
+    global _firmware_has_init_boot
+    _firmware_has_init_boot = value
 
 
 # ============================================================================
 #                               Function get_rom_has_init_boot
 # ============================================================================
 def get_rom_has_init_boot():
-    global rom_has_init_boot
-    return rom_has_init_boot
+    global _rom_has_init_boot
+    return _rom_has_init_boot
 
 
 # ============================================================================
 #                               Function set_rom_has_init_boot
 # ============================================================================
 def set_rom_has_init_boot(value):
-    global rom_has_init_boot
-    rom_has_init_boot = value
+    global _rom_has_init_boot
+    _rom_has_init_boot = value
 
 
 # ============================================================================
 #                               Function get_dlg_checkbox_values
 # ============================================================================
 def get_dlg_checkbox_values():
-    global dlg_checkbox_values
-    return dlg_checkbox_values
+    global _dlg_checkbox_values
+    return _dlg_checkbox_values
 
 
 # ============================================================================
 #                               Function set_dlg_checkbox_values
 # ============================================================================
 def set_dlg_checkbox_values(value):
-    global dlg_checkbox_values
-    dlg_checkbox_values = value
+    global _dlg_checkbox_values
+    _dlg_checkbox_values = value
 
 
 # ============================================================================
 #                               Function get_firmware_model
 # ============================================================================
 def get_firmware_model():
-    global firmware_model
-    return firmware_model
+    global _firmware_model
+    return _firmware_model
 
 
 # ============================================================================
 #                               Function set_firmware_model
 # ============================================================================
 def set_firmware_model(value):
-    global firmware_model
-    firmware_model = value
+    global _firmware_model
+    _firmware_model = value
 
 
 # ============================================================================
 #                               Function get_firmware_id
 # ============================================================================
 def get_firmware_id():
-    global firmware_id
-    return firmware_id
+    global _firmware_id
+    return _firmware_id
 
 
 # ============================================================================
 #                               Function set_firmware_id
 # ============================================================================
 def set_firmware_id(value):
-    global firmware_id
-    firmware_id = value
+    global _firmware_id
+    _firmware_id = value
 
 
 # ============================================================================
 #                               Function get_custom_rom_id
 # ============================================================================
 def get_custom_rom_id():
-    global custom_rom_id
-    return custom_rom_id
+    global _custom_rom_id
+    return _custom_rom_id
 
 
 # ============================================================================
 #                               Function set_custom_rom_id
 # ============================================================================
 def set_custom_rom_id(value):
-    global custom_rom_id
-    custom_rom_id = value
+    global _custom_rom_id
+    _custom_rom_id = value
 
 
 # ============================================================================
 #                               Function get_logfile
 # ============================================================================
 def get_logfile():
-    global logfile
-    return logfile
+    global _logfile
+    return _logfile
 
 
 # ============================================================================
 #                               Function set_logfile
 # ============================================================================
 def set_logfile(value):
-    global logfile
-    logfile = value
+    global _logfile
+    _logfile = value
 
 
 # ============================================================================
 #                               Function get_pumlfile
 # ============================================================================
 def get_pumlfile():
-    global pumlfile
-    return pumlfile
+    global _pumlfile
+    return _pumlfile
 
 
 # ============================================================================
 #                               Function set_pumlfile
 # ============================================================================
 def set_pumlfile(value):
-    global pumlfile
-    pumlfile = value
+    global _pumlfile
+    _pumlfile = value
 
 
 # ============================================================================
 #                               Function get_sdk_version
 # ============================================================================
 def get_sdk_version():
-    global sdk_version
-    return sdk_version
+    global _sdk_version
+    return _sdk_version
 
 
 # ============================================================================
 #                               Function set_sdk_version
 # ============================================================================
 def set_sdk_version(value):
-    global sdk_version
-    sdk_version = value
+    global _sdk_version
+    _sdk_version = value
 
 
 # ============================================================================
 #                               Function get_image_mode
 # ============================================================================
 def get_image_mode():
-    global image_mode
-    return image_mode
+    global _image_mode
+    return _image_mode
 
 
 # ============================================================================
 #                               Function set_image_mode
 # ============================================================================
 def set_image_mode(value):
-    global image_mode
-    image_mode = value
+    global _image_mode
+    _image_mode = value
 
 
 # ============================================================================
 #                               Function get_image_path
 # ============================================================================
 def get_image_path():
-    global image_path
-    return image_path
+    global _image_path
+    return _image_path
 
 
 # ============================================================================
 #                               Function set_image_path
 # ============================================================================
 def set_image_path(value):
-    global image_path
-    image_path = value
+    global _image_path
+    _image_path = value
 
 
 # ============================================================================
 #                               Function get_custom_rom_file
 # ============================================================================
 def get_custom_rom_file():
-    global custom_rom_file
-    return custom_rom_file
+    global _custom_rom_file
+    return _custom_rom_file
 
 
 # ============================================================================
 #                               Function set_custom_rom_file
 # ============================================================================
 def set_custom_rom_file(value):
-    global custom_rom_file
-    custom_rom_file = value
+    global _custom_rom_file
+    _custom_rom_file = value
 
 
 # ============================================================================
 #                               Function get_message_box_title
 # ============================================================================
 def get_message_box_title():
-    global message_box_title
-    return message_box_title
+    global _message_box_title
+    return _message_box_title
 
 
 # ============================================================================
 #                               Function set_message_box_title
 # ============================================================================
 def set_message_box_title(value):
-    global message_box_title
-    message_box_title = value
+    global _message_box_title
+    _message_box_title = value
 
 
 # ============================================================================
 #                               Function get_message_box_message
 # ============================================================================
 def get_message_box_message():
-    global message_box_message
-    return message_box_message
+    global _message_box_message
+    return _message_box_message
 
 
 # ============================================================================
 #                               Function set_message_box_message
 # ============================================================================
 def set_message_box_message(value):
-    global message_box_message
-    message_box_message = value
+    global _message_box_message
+    _message_box_message = value
+
+
+# ============================================================================
+#                               Function get_downgrade_boot_path
+# ============================================================================
+def get_downgrade_boot_path():
+    boot = get_boot()
+    if not boot:
+        return None, False
+
+    boot_path = boot.boot_path
+    directory_path = os.path.dirname(boot_path)
+    downgrade_file_name = "downgrade_boot.img"
+    downgrade_file_path = os.path.join(directory_path, downgrade_file_name)
+    if os.path.exists(downgrade_file_path):
+        return downgrade_file_path, True
+    else:
+        return downgrade_file_path, False
 
 
 # ============================================================================
 #                               Function puml
 # ============================================================================
 def puml(message='', left_ts = False, mode='a'):
-    with open(get_pumlfile(), mode, encoding="ISO-8859-1", errors="replace") as puml_file:
-        puml_file.write(message)
-        if left_ts:
-            puml_file.write(f"note left:{datetime.now():%Y-%m-%d %H:%M:%S}\n")
+    if get_puml_state():
+        with open(get_pumlfile(), mode, encoding="ISO-8859-1", errors="replace") as puml_file:
+            puml_file.write(message)
+            if left_ts:
+                puml_file.write(f"note left:{datetime.now():%Y-%m-%d %H:%M:%S}\n")
 
 
 # ============================================================================
@@ -973,15 +1117,15 @@ def init_config_path(config_file_path=''):
 # ============================================================================
 def init_db():
     try:
-        global db
+        global _db
         config_path = get_sys_config_path()
         # connect / create db
-        db = sl.connect(os.path.join(config_path, get_pf_db()))
-        db.execute("PRAGMA foreign_keys = ON")
+        _db = sl.connect(os.path.join(config_path, get_pf_db()))
+        _db.execute("PRAGMA foreign_keys = ON")
         # create tables
-        with db:
+        with _db:
             # PACKAGE Table
-            db.execute("""
+            _db.execute("""
                 CREATE TABLE IF NOT EXISTS PACKAGE (
                     id INTEGER NOT NULL PRIMARY KEY,
                     boot_hash TEXT NOT NULL,
@@ -992,7 +1136,7 @@ def init_db():
                 );
             """)
             # BOOT Table
-            db.execute("""
+            _db.execute("""
                 CREATE TABLE IF NOT EXISTS BOOT (
                     id INTEGER NOT NULL PRIMARY KEY,
                     boot_hash TEXT NOT NULL UNIQUE,
@@ -1005,7 +1149,7 @@ def init_db():
                 );
             """)
             # PACKAGE_BOOT Table
-            db.execute("""
+            _db.execute("""
                 CREATE TABLE IF NOT EXISTS PACKAGE_BOOT (
                     package_id INTEGER,
                     boot_id INTEGER,
@@ -1018,55 +1162,56 @@ def init_db():
 
             # Check if the patch_method and is_odin column already exists in the BOOT table
             # Added in version 5.1
-            cursor = db.execute("PRAGMA table_info(BOOT)")
+            cursor = _db.execute("PRAGMA table_info(BOOT)")
             columns = cursor.fetchall()
             column_names = [column[1] for column in columns]
 
             if 'patch_method' not in column_names:
                 # Add the patch_method column to the BOOT table
-                db.execute("ALTER TABLE BOOT ADD COLUMN patch_method TEXT;")
+                _db.execute("ALTER TABLE BOOT ADD COLUMN patch_method TEXT;")
             if 'is_odin' not in column_names:
                 # Add the is_odin column to the BOOT table
-                db.execute("ALTER TABLE BOOT ADD COLUMN is_odin INTEGER;")
+                _db.execute("ALTER TABLE BOOT ADD COLUMN is_odin INTEGER;")
             # Added in version 5.4
             if 'is_stock_boot' not in column_names:
                 # Add the is_stock_boot column to the BOOT table
-                db.execute("ALTER TABLE BOOT ADD COLUMN is_stock_boot INTEGER;")
+                _db.execute("ALTER TABLE BOOT ADD COLUMN is_stock_boot INTEGER;")
             if 'is_init_boot' not in column_names:
                 # Add the is_init_boot column to the BOOT table
-                db.execute("ALTER TABLE BOOT ADD COLUMN is_init_boot INTEGER;")
+                _db.execute("ALTER TABLE BOOT ADD COLUMN is_init_boot INTEGER;")
             if 'patch_source_sha1' not in column_names:
                 # Add the patch_source_sha1 column to the BOOT table
-                db.execute("ALTER TABLE BOOT ADD COLUMN patch_source_sha1 INTEGER;")
+                _db.execute("ALTER TABLE BOOT ADD COLUMN patch_source_sha1 INTEGER;")
 
             # Check if the full_ota column already exists in the PACKAGE table
             # Added in version 5.8
-            cursor = db.execute("PRAGMA table_info(PACKAGE)")
+            cursor = _db.execute("PRAGMA table_info(PACKAGE)")
             columns = cursor.fetchall()
             column_names = [column[1] for column in columns]
 
             if 'full_ota' not in column_names:
                 # Add the full_ota column to the BOOT table (values: 0:Not Full OTA, 1:Full OTA NULL:UNKNOWN)
-                db.execute("ALTER TABLE PACKAGE ADD COLUMN full_ota INTEGER;")
+                _db.execute("ALTER TABLE PACKAGE ADD COLUMN full_ota INTEGER;")
     except Exception as e:
         print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error while init_db")
         traceback.print_exc()
+
 
 # ============================================================================
 #                               Function get_config_file_path
 # ============================================================================
 def get_config_file_path():
     # return os.path.join(get_sys_config_path(), CONFIG_FILE_NAME).strip()
-    global config_file_path
-    return config_file_path
+    global _config_file_path
+    return _config_file_path
 
 
 # ============================================================================
 #                               Function set_config
 # ============================================================================
 def set_config_file_path(value):
-    global config_file_path
-    config_file_path = value
+    global _config_file_path
+    _config_file_path = value
 
 
 # ============================================================================
@@ -1080,16 +1225,16 @@ def get_sys_config_path():
 #                               Function get_config_path
 # ============================================================================
 def get_config_path():
-    global config_path
-    return config_path
+    global _config_path
+    return _config_path
 
 
 # ============================================================================
 #                               Function set_config_path
 # ============================================================================
 def set_config_path(value):
-    global config_path
-    config_path = value
+    global _config_path
+    _config_path = value
 
 
 # ============================================================================
@@ -1128,10 +1273,24 @@ def get_coords_file_path():
 
 
 # ============================================================================
+#                               Function get_skip_urls_file_path
+# ============================================================================
+def get_skip_urls_file_path():
+    return os.path.join(get_config_path(), "skip_urls.txt").strip()
+
+
+# ============================================================================
 #                               Function get_wifi_history_file_path
 # ============================================================================
 def get_wifi_history_file_path():
     return os.path.join(get_config_path(), "wireless.json").strip()
+
+
+# ============================================================================
+#                               Function get_mytools_file_path
+# ============================================================================
+def get_mytools_file_path():
+    return os.path.join(get_config_path(), "mytools.json").strip()
 
 
 # ============================================================================
@@ -1174,6 +1333,7 @@ def delete_bundled_library(library_names):
         print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error while deleting bundled library")
         traceback.print_exc()
 
+
 # ============================================================================
 #                               Function get_bundle_dir
 # ============================================================================
@@ -1196,7 +1356,7 @@ def check_latest_version():
     try:
         url = 'https://github.com/badabing2005/PixelFlasher/releases/latest'
         response = request_with_fallback(method='GET', url=url)
-        # look in history to find the 302, and get the loaction header
+        # look in history to find the 302, and get the location header
         location = response.history[0].headers['Location']
         # split by '/' and get the last item
         l_version = location.split('/')[-1]
@@ -1239,6 +1399,9 @@ def open_folder(self, path, isFile = False):
             dir_path = os.path.dirname(path)
         else:
             dir_path = path
+        if not os.path.exists(dir_path):
+            print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: {dir_path} does not exist.")
+            return
         if sys.platform == "darwin":
             subprocess.Popen(["open", dir_path], env=get_env_variables())
         elif sys.platform == "win32":
@@ -1246,6 +1409,8 @@ def open_folder(self, path, isFile = False):
         # linux
         elif self.config.linux_file_explorer:
             subprocess.Popen([self.config.linux_file_explorer, dir_path], env=get_env_variables())
+        elif subprocess.call(["which", "xdg-open"], stdout=subprocess.PIPE, stderr=subprocess.PIPE) == 0:
+            subprocess.Popen(["xdg-open", dir_path], env=get_env_variables())  # prefer xdg-open if available
         else:
             subprocess.Popen(["nautilus", dir_path], env=get_env_variables())
     except Exception as e:
@@ -1278,6 +1443,154 @@ def open_terminal(self, path, isFile=False):
 
 
 # ============================================================================
+#                      Function get_compression_method
+# ============================================================================
+def get_compression_method(zip_path, file_to_replace):
+    try:
+        path_to_7z = get_path_to_7z()
+        theCmd = f"\"{path_to_7z}\" l -slt \"{zip_path}\""
+        result = subprocess.run(theCmd, shell=True, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        output = result.stdout.decode()
+
+        # Parse the output to find the compression method
+        in_file_section = False
+        for line in output.splitlines():
+            if line.startswith("Path = "):
+                in_file_section = file_to_replace in line
+            if in_file_section and line.startswith("Method = "):
+                return line.split(" = ")[1]
+        return None
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error in function get_compression_method.")
+        traceback.print_exc()
+        return None
+
+
+# ============================================================================
+#                               Function extract_from_nested_tgz
+# ============================================================================
+def extract_from_nested_tgz(archive_path, file_paths, output_dir):
+    """
+    Extract files from nested archives (like tgz -> tar -> folder structure).
+
+    Args:
+        archive_path: Path to the outer archive file
+        file_paths: List of filenames to extract
+        output_dir: Directory to extract files to
+
+    Returns:
+        True if all files were successfully extracted, False otherwise
+    """
+
+    temp_dir = tempfile.mkdtemp(dir=tempfile.gettempdir())
+    success = True
+
+    try:
+        path_to_7z = get_path_to_7z()
+
+        # First extract the outer archive (tgz) to get the inner archive (tar)
+        debug(f"Extracting outer archive to {temp_dir}")
+
+        cmd = f"\"{path_to_7z}\" x -bd -y -o\"{temp_dir}\" \"{archive_path}\""
+        debug(f"{cmd}")
+        result = run_shell(cmd)
+        if result.returncode != 0:
+            print(f"❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Failed to extract outer archive")
+            return False
+
+        # Find the inner tar file
+        tar_file = None
+        for root, _, files in os.walk(temp_dir):
+            for file in files:
+                if file.endswith('.tar'):
+                    tar_file = os.path.join(root, file)
+                    break
+            if tar_file:
+                break
+
+        if not tar_file:
+            print(f"❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Could not find inner tar archive")
+            return False
+
+        # Extract the tar file to the temp directory
+        debug(f"Extracting inner archive {tar_file}")
+
+        inner_extract_dir = os.path.join(temp_dir, "inner")
+        os.makedirs(inner_extract_dir, exist_ok=True)
+
+        cmd = f"\"{path_to_7z}\" x -bd -y -o\"{inner_extract_dir}\" \"{tar_file}\""
+        debug(f"{cmd}")
+        result = run_shell(cmd)
+        if result.returncode != 0:
+            print(f"❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Failed to extract inner archive")
+            return False
+        # delete the tar file
+        os.remove(tar_file)
+
+        # Copy each needed file to the output directory
+        for file_name in file_paths.split():
+            found = False
+            file_path = None
+
+            for root, _, files in os.walk(inner_extract_dir):
+                for file in files:
+                    if file == file_name:
+                        file_path = os.path.join(root, file)
+                        found = True
+                        break
+                if found:
+                    break
+
+            if file_path and os.path.exists(file_path):
+                output_file = os.path.join(output_dir, file_name)
+                shutil.copy2(file_path, output_file)
+                debug(f"Extracted {file_name} to {output_file}")
+            else:
+                print(f"❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Could not find {file_name} in extracted content")
+                success = False
+
+    except Exception as e:
+        print(f"❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Failed to extract from nested archive: {str(e)}")
+        traceback.print_exc()
+        success = False
+    finally:
+        try:
+            shutil.rmtree(temp_dir)
+        except Exception as e:
+            debug(f"❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: cleaning up temp directory: {str(e)}")
+    return success
+
+
+# ============================================================================
+#                   Function replace_file_in_zip_with_7zip
+# ============================================================================
+def replace_file_in_zip_with_7zip(zip_path, file_to_replace, new_file_path):
+    try:
+        path_to_7z = get_path_to_7z()
+
+        # Delete the existing file
+        theCmd = f"\"{path_to_7z}\" d \"{zip_path}\" \"{file_to_replace}\""
+        debug(theCmd)
+        res = run_shell2(theCmd)
+
+        # add the replacement file
+        theCmd = f"\"{path_to_7z}\" a \"{zip_path}\" \"{new_file_path}\" -m0=Deflate -mx=0"
+        debug(theCmd)
+        res = run_shell2(theCmd)
+        if res.returncode == 0:
+            debug(f"Successfully replaced {file_to_replace} in {zip_path}")
+            return True
+        else:
+            print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Failed to replace {file_to_replace} in {zip_path}")
+            print(res.stderr.decode())
+            return False
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error in function replace_file_in_zip_with_7zip.")
+        traceback.print_exc()
+        return False
+
+
+# ============================================================================
 #                               Function check_archive_contains_file
 # ============================================================================
 def check_archive_contains_file(archive_file_path, file_to_check, nested=False, is_recursive=False):
@@ -1301,7 +1614,7 @@ def check_archive_contains_file(archive_file_path, file_to_check, nested=False, 
 
 
 # ============================================================================
-#                               Function check_zip_conatins_file
+#                               Function check_zip_contains_file
 # ============================================================================
 def check_zip_contains_file(zip_file_path, file_to_check, low_mem, nested=False, is_recursive=False):
     if low_mem:
@@ -1310,36 +1623,65 @@ def check_zip_contains_file(zip_file_path, file_to_check, low_mem, nested=False,
         return check_zip_contains_file_fast(zip_file_path, file_to_check, nested, is_recursive)
 
 
-
 # ============================================================================
-#                               Function check_zip_conatins_file_fast
+#                               Function check_zip_contains_file_fast
 # ============================================================================
 def check_zip_contains_file_fast(zip_file_path, file_to_check, nested=False, is_recursive=False):
     try:
         if not is_recursive:
             debug(f"Looking for {file_to_check} in zipfile {zip_file_path} with zip-nested: {nested}")
-        with zipfile.ZipFile(zip_file_path, 'r') as zip_file:
-            for name in zip_file.namelist():
-                if name.endswith(f'/{file_to_check}') or name == file_to_check:
-                    if not is_recursive:
-                        debug(f"Found: {name}\n")
-                    return name
-                elif nested and name.endswith('.zip'):
-                    with zip_file.open(name, 'r') as nested_zip_file:
-                        nested_zip_data = nested_zip_file.read()
-                    with io.BytesIO(nested_zip_data) as nested_zip_stream:
-                        with zipfile.ZipFile(nested_zip_stream, 'r') as nested_zip:
-                            nested_file_path = check_zip_contains_file_fast(nested_zip_stream, file_to_check, nested=True, is_recursive=True)
-                            if nested_file_path:
-                                if not is_recursive:
-                                    debug(f"Found: {name}/{nested_file_path}\n")
-                                return f'{name}/{nested_file_path}'
-            debug(f"file: {file_to_check} was NOT found\n")
+        try:
+            with zipfile.ZipFile(zip_file_path, 'r') as zip_file:
+                for name in zip_file.namelist():
+                    if name.endswith(f'/{file_to_check}') or name == file_to_check:
+                        if not is_recursive:
+                            debug(f"Found: {name}\n")
+                        return name
+                    elif nested and name.endswith('.zip'):
+                        with zip_file.open(name, 'r') as nested_zip_file:
+                            nested_zip_data = nested_zip_file.read()
+                        with io.BytesIO(nested_zip_data) as nested_zip_stream:
+                            with zipfile.ZipFile(nested_zip_stream, 'r') as nested_zip:
+                                nested_file_path = check_zip_contains_file_fast(nested_zip_stream, file_to_check, nested=True, is_recursive=True)
+                                if nested_file_path:
+                                    if not is_recursive:
+                                        debug(f"Found: {name}/{nested_file_path}\n")
+                                    return f'{name}/{nested_file_path}'
+        except zipfile.BadZipFile:
+            print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: File {zip_file_path} is not a zip file or is corrupt, skipping this file ...")
             return ''
+        debug(f"file: {file_to_check} was NOT found\n")
+        return ''
     except Exception as e:
-        print(f"Failed to check_zip_contains_file_fast. Reason: {e}")
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Failed to check_zip_contains_file_fast. Reason: {e}")
         traceback.print_exc()
         return ''
+
+
+# ============================================================================
+#                               Function check_file_pattern_in_zip_file
+# ============================================================================
+def check_file_pattern_in_zip_file(zip_file_path, pattern, return_all_matches=False):
+    try:
+        with zipfile.ZipFile(zip_file_path, 'r') as myzip:
+            if return_all_matches:
+                matches = [file for file in myzip.namelist() if fnmatch.fnmatch(file, pattern)]
+                return matches
+            else:
+                for file in myzip.namelist():
+                    if fnmatch.fnmatch(file, pattern):
+                        return file
+        if return_all_matches:
+            return []
+        else:
+            return ''
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Failed to check_file_pattern_in_zip_file. Reason: {e}")
+        traceback.print_exc()
+        if return_all_matches:
+            return []
+        else:
+            return ''
 
 
 # ============================================================================
@@ -1350,7 +1692,7 @@ def check_img_contains_file(img_file_path, file_to_check):
         result = subprocess.run([get_path_to_7z(), 'l', img_file_path], capture_output=True, text=True)
 
         if "Unexpected end of archive" in result.stderr:
-            print(f"Warning: Unexpected end of archive in {img_file_path}")
+            print(f"⚠️ Warning: Unexpected end of archive in {img_file_path}")
             return []
 
         file_list = result.stdout.split('\n')
@@ -1371,7 +1713,7 @@ def check_img_contains_file(img_file_path, file_to_check):
 
         return matches
     except Exception as e:
-        print(f"Failed to check_img_contains_file. Reason: {e}")
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Failed to check_img_contains_file. Reason: {e}")
         traceback.print_exc()
         return []
 
@@ -1385,41 +1727,55 @@ def check_zip_contains_file_lowmem(zip_file_path, file_to_check, nested=False, i
             debug(f"Looking for {file_to_check} in zipfile {zip_file_path} with zip-nested: {nested} Low Memory version.")
 
         stack = [(zip_file_path, '')]
+        temp_files = []
 
         while stack:
             current_zip, current_path = stack.pop()
 
-            with zipfile.ZipFile(current_zip, 'r') as zip_file:
-                for name in zip_file.namelist():
-                    full_name = os.path.join(current_path, name)
-                    debug(f"Checking: {full_name}")
+            try:
+                with zipfile.ZipFile(current_zip, 'r') as zip_file:
+                    # Check for corrupted files
+                    corrupted_file = zip_file.testzip()
+                    if corrupted_file is not None:
+                        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Corrupted file found: {corrupted_file} in {current_zip} - skipping this zip file ...")
+                        continue
 
-                    # if full_name.endswith(f'/{file_to_check}') or full_name == file_to_check:
-                    if os.path.basename(full_name) == file_to_check:
-                        debug(f"Found: {full_name}")
-                        return full_name
-                    elif nested and name.endswith('.zip'):
-                        debug(f"Entering nested zip: {full_name}")
-                        with zip_file.open(name, 'r') as nested_zip_file:
-                            nested_zip_data = nested_zip_file.read()
+                    for name in zip_file.namelist():
+                        full_name = os.path.join(current_path, name)
+                        debug(f"Checking: {full_name}")
 
-                        with tempfile.NamedTemporaryFile(delete=False) as temp_zip_file:
-                            temp_zip_file.write(nested_zip_data)
-                            temp_zip_path = temp_zip_file.name
+                        if os.path.basename(full_name) == file_to_check:
+                            debug(f"Found: {full_name}")
+                            return full_name
+                        elif nested and name.endswith('.zip'):
+                            debug(f"Entering nested zip: {full_name}")
+                            with zip_file.open(name, 'r') as nested_zip_file:
+                                nested_zip_data = nested_zip_file.read()
 
-                        # Close the temporary zip file
-                        temp_zip_file.close()
+                            with tempfile.NamedTemporaryFile(delete=False) as temp_zip_file:
+                                temp_zip_file.write(nested_zip_data)
+                                temp_zip_path = temp_zip_file.name
 
-                        stack.append((temp_zip_path, full_name))
-                        if is_recursive:
-                            stack.append((temp_zip_path, full_name))  # Add the nested zip to be processed recursively
+                            # Close the temporary zip file
+                            temp_zip_file.close()
 
-                        # Clean up the temporary zip file
-                        os.remove(temp_zip_path)
+                            stack.append((temp_zip_path, full_name))
+                            temp_files.append(temp_zip_path)
+                            if is_recursive:
+                                stack.append((temp_zip_path, full_name))  # Add the nested zip to be processed recursively
+            except zipfile.BadZipFile:
+                print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: File {current_zip} is not a zip file or is corrupt, skipping this file ...")
+                continue
+
         debug(f"File {file_to_check} was NOT found")
+
+        # Clean up the temporary zip files
+        for temp_file in temp_files:
+            os.remove(temp_file)
+
         return ''
     except Exception as e:
-        print(f"Failed to check_zip_contains_file_lowmem. Reason: {e}")
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Failed to check_zip_contains_file_lowmem. Reason: {e}")
         traceback.print_exc()
         return ''
 
@@ -1510,12 +1866,13 @@ def find_file_by_prefix(directory, prefix):
 
 
 # ============================================================================
-#                               Function get_ui_cooridnates
+#                               Function get_ui_coordinates
 # ============================================================================
 def get_ui_cooridnates(xmlfile, search):
     with open(xmlfile, "r", encoding='ISO-8859-1', errors="replace") as fin:
         data = fin.read()
-    regex = re.compile(f"{search}.*?bounds\=\"\[(\d+),(\d+)\]\[(\d+),(\d+)\]\".+")
+    regex = re.compile(rf'{search}.*?bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]".+')
+
     m = re.findall(regex, data)
     if m:
         debug(f"Found Bounds: {m[0][0]} {m[0][1]} {m[0][2]} {m[0][3]}")
@@ -1532,12 +1889,16 @@ def get_playstore_user_coords(xmlfile):
     with open(xmlfile, "r", encoding='ISO-8859-1', errors="replace") as fin:
         xml_content = fin.read()
 
-    # Find the position of "Show notifications and offers"
-    show_notifications_position = xml_content.find('Show notifications and offers')
+    # Find the position of "Voice Search"
+    user_search_position = xml_content.find('Voice Search')
 
-    # Check if "Show notifications and offers" is found
-    if show_notifications_position != -1:
-        node = xml_content.find('/node', show_notifications_position)
+    # Check if "Voice Search" is found
+    if user_search_position == -1:
+        # Fallback to old version.
+        user_search_position = xml_content.find('Show notifications and offers')
+
+    if user_search_position != -1:
+        node = xml_content.find('/node', user_search_position)
 
         if node != -1:
             bounds_pos = xml_content.find('bounds=', node)
@@ -1589,7 +1950,7 @@ def extract_sha1(binfile, length=8):
 def compare_sha1(SHA1, Extracted_SHA1):
     try:
         if len(SHA1) != len(Extracted_SHA1):
-            print("Warning!: The SHA1 values have different lengths")
+            print("⚠️ Warning!: The SHA1 values have different lengths")
             return 0
         else:
             num_match = 0
@@ -1659,6 +2020,26 @@ def extract_fingerprint(binfile):
 def debug(message):
     if get_verbose():
         print(f"debug: {message}")
+
+
+# ============================================================================
+#                               Function print_user_interaction_message
+# ============================================================================
+def print_user_interaction_message(mode):
+    message = f'''
+\n%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+Programmatic reboot to mode {mode} is failing.
+There could be several reasons for this.
+- Your device bootloader is locked.
+- The device / platform tools does not support this option.
+- Your phone is not connected / detected.
+
+Is your device is waiting for interaction? if so perform the actions manually.
+- Using volume keys, scroll up and down and select the proper option.
+- Press the power button to apply.
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%\n
+'''
+    print(message)
 
 
 # ============================================================================
@@ -1750,6 +2131,9 @@ def create_boot_tar(dir, source='boot.img', dest='boot.tar'):
         os.chdir(dir)
         with tarfile.open(dest, 'w', format=tarfile.GNU_FORMAT) as tar:
             tar.add(source, arcname=source)
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error while creating boot.tar")
+        traceback.print_exc()
     finally:
         os.chdir(original_dir)
 
@@ -1767,7 +2151,7 @@ def get_code_page():
         else:
             theCmd = "chcp"
             res = run_shell(theCmd)
-            if res.returncode == 0:
+            if res and isinstance(res, subprocess.CompletedProcess) and res.returncode == 0:
                 # extract the code page portion
                 try:
                     debug(f"CP: {res.stdout}")
@@ -1827,11 +2211,13 @@ def create_support_zip():
         print(f"\nℹ️ {datetime.now():%Y-%m-%d %H:%M:%S} Creating support.zip file ...")
         config_path = get_config_path()
         sys_config_path = get_sys_config_path()
+        config = get_config()
         tmp_dir_full = os.path.join(config_path, 'tmp')
         support_dir_full = os.path.join(config_path, 'support')
         support_zip = os.path.join(tmp_dir_full, 'support.zip')
+        temp_dir = tempfile.gettempdir()
 
-        # if a previous support dir exist delete it allong with support.zip
+        # if a previous support dir exist delete it along with support.zip
         if os.path.exists(support_dir_full):
             debug("Deleting old support files ...")
             delete_all(support_dir_full)
@@ -1896,33 +2282,67 @@ def create_support_zip():
 
         # sanitize json
         file_path = os.path.join(support_dir_full, 'PixelFlasher.json')
-        if os.path.exists(file_path):
+        if os.path.exists(file_path) and config.sanitize_support_files:
             sanitize_file(file_path)
         # sanitize files.txt
         file_path = os.path.join(support_dir_full, 'files.txt')
-        if os.path.exists(file_path):
+        if os.path.exists(file_path) and config.sanitize_support_files:
             sanitize_file(file_path)
 
         # for each file in logs, sanitize
-        for filename in os.listdir(logs_dir):
-            file_path = os.path.join(logs_dir, filename)
-            if os.path.exists(file_path):
-                sanitize_file(file_path)
+        if config.sanitize_support_files:
+            for filename in os.listdir(logs_dir):
+                file_path = os.path.join(logs_dir, filename)
+                if os.path.exists(file_path):
+                    sanitize_file(file_path)
 
-        # for each file in logs, sanitize
-        for filename in os.listdir(puml_dir):
-            file_path = os.path.join(puml_dir, filename)
-            if os.path.exists(file_path):
-                sanitize_file(file_path)
+            # for each file in logs, sanitize
+            for filename in os.listdir(puml_dir):
+                file_path = os.path.join(puml_dir, filename)
+                if os.path.exists(file_path):
+                    sanitize_file(file_path)
 
         # sanitize db
         file_path = os.path.join(support_dir_full, get_pf_db())
-        if os.path.exists(file_path):
+        if os.path.exists(file_path) and config.sanitize_support_files:
             sanitize_db(file_path)
+
+        # create symmetric key
+        session_key = Fernet.generate_key()
 
         # zip support folder
         debug(f"Zipping {support_dir_full} ...")
-        shutil.make_archive(support_dir_full, 'zip', support_dir_full)
+        zip_file_path = shutil.make_archive(support_dir_full, 'zip', support_dir_full)
+
+        # delete support folder
+        if not config.keep_temporary_support_files:
+            delete_all(support_dir_full)
+
+        # encrypt support.zip with session key
+        symmetric_cipher = Fernet(session_key)
+        with open(zip_file_path, 'rb') as f:
+            encrypted_data = symmetric_cipher.encrypt(f.read())
+        encrypted_zip_file_path = zip_file_path + '.pf'
+        with open(encrypted_zip_file_path, 'wb') as f:
+            f.write(encrypted_data)
+
+        # delete unencrypted support.zip
+        os.remove(zip_file_path)
+
+        # encrypt session key with RSA public key
+        encrypted_session_key_path = os.path.join(tmp_dir_full, 'pf.dat')
+        encrypt_sk(session_key=session_key, output_file_name=encrypted_session_key_path, public_key=None)
+
+        # zip encrypted support.zip and session key
+        final_zip_file_path = zip_file_path
+        with zipfile.ZipFile(final_zip_file_path, 'w') as final_zip:
+            final_zip.write(encrypted_zip_file_path, arcname='support.pf')
+            final_zip.write(encrypted_session_key_path, arcname='pf.dat')
+
+        # delete encrypted support.zip and session key
+        os.remove(encrypted_zip_file_path)
+        os.remove(encrypted_session_key_path)
+
     except Exception as e:
         print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error while creating support.zip.")
         traceback.print_exc()
@@ -1932,61 +2352,107 @@ def create_support_zip():
 #                               Function sanitize_file
 # ============================================================================
 def sanitize_file(filename):
-    debug(f"Santizing {filename} ...")
-    with contextlib.suppress(Exception):
-        with open(filename, "rt", encoding='ISO-8859-1', errors="replace") as fin:
-            data = fin.read()
-        data = re.sub(r'(\\Users\\+)(?:.*?)(\\+)', r'\1REDACTED\2', data, flags=re.IGNORECASE)
-        data = re.sub(r'(\/Users\/+)(?:.*?)(\/+)', r'\1REDACTED\2', data, flags=re.IGNORECASE)
-        data = re.sub(r'(\"device\":\s+)(\"\w+?\")', r'\1REDACTED', data, flags=re.IGNORECASE)
-        data = re.sub(r'(device\sid:\s+)(\w+)', r'\1REDACTED', data, flags=re.IGNORECASE)
-        data = re.sub(r'(device:\s+)(\w+)', r'\1REDACTED', data, flags=re.IGNORECASE)
-        data = re.sub(r'(device\s+\')(\w+)', r'\1REDACTED', data, flags=re.IGNORECASE)
-        data = re.sub(r'(superkey:\s+)(\w+)', r'\1REDACTED', data, flags=re.IGNORECASE)
-        data = re.sub(r'(./boot_patch.sh\s+)(\w+)', r'\1REDACTED', data, flags=re.IGNORECASE)
-        data = re.sub(r'(Rebooting device\s+)(\w+)', r'\1REDACTED', data, flags=re.IGNORECASE)
-        data = re.sub(r'(Flashing device\s+)(\w+)', r'\1REDACTED', data, flags=re.IGNORECASE)
-        data = re.sub(r'(waiting for\s+)(\w+)', r'\1REDACTED', data, flags=re.IGNORECASE)
-        data = re.sub(r'(Serial\sNumber\.+\:\s+)(\w+)', r'\1REDACTED', data, flags=re.IGNORECASE)
-        data = re.sub(r'(fastboot(.exe)?\"? -s\s+)(\w+)', r'\1REDACTED', data, flags=re.IGNORECASE)
-        data = re.sub(r'(adb(.exe)?\"? -s\s+)(\w+)', r'\1REDACTED', data, flags=re.IGNORECASE)
-        data = re.sub(r'(\S\  \((?:adb|f\.b|rec|sid)\)   )(.+?)(\s+.*)', r'\1REDACTED\3', data, flags=re.IGNORECASE)
-        with open(filename, "wt", encoding='ISO-8859-1', errors="replace") as fin:
-            fin.write(data)
+    try:
+        debug(f"Sanitizing {filename} ...")
+        with contextlib.suppress(Exception):
+            with open(filename, "rt", encoding='ISO-8859-1', errors="replace") as fin:
+                data = fin.read()
+            data = re.sub(r'(\\Users\\+)(?:.*?)(\\+)', r'\1REDACTED\2', data, flags=re.IGNORECASE)
+            data = re.sub(r'(\/Users\/+)(?:.*?)(\/+)', r'\1REDACTED\2', data, flags=re.IGNORECASE)
+            data = re.sub(r'(\"device\":\s+)(\"\w+?\")', r'\1REDACTED', data, flags=re.IGNORECASE)
+            data = re.sub(r'(device\sid:\s+)(\w+)', r'\1REDACTED', data, flags=re.IGNORECASE)
+            data = re.sub(r'(device:\s+)(\w+)', r'\1REDACTED', data, flags=re.IGNORECASE)
+            data = re.sub(r'(device\s+\')(\w+)', r'\1REDACTED', data, flags=re.IGNORECASE)
+            data = re.sub(r'(\(usb\)\s+)(\w+)', r'\1REDACTED', data, flags=re.IGNORECASE)
+            data = re.sub(r'(superkey:\s+)(\w+)', r'\1REDACTED', data, flags=re.IGNORECASE)
+            data = re.sub(r'(./boot_patch.sh\s+)(\w+)', r'\1REDACTED', data, flags=re.IGNORECASE)
+            data = re.sub(r'(Rebooting device\s+)(\w+)', r'\1REDACTED', data, flags=re.IGNORECASE)
+            data = re.sub(r'(Flashing device\s+)(\w+)', r'\1REDACTED', data, flags=re.IGNORECASE)
+            data = re.sub(r'(waiting for\s+)(\w+)', r'\1REDACTED', data, flags=re.IGNORECASE)
+            data = re.sub(r'(Serial\sNumber\.+\:\s+)(\w+)', r'\1REDACTED', data, flags=re.IGNORECASE)
+            data = re.sub(r'(fastboot(.exe)?\"? -s\s+)(\w+)', r'\1REDACTED', data, flags=re.IGNORECASE)
+            data = re.sub(r'(adb(.exe)?\"? -s\s+)(\w+)', r'\1REDACTED', data, flags=re.IGNORECASE)
+            data = re.sub(r'(\S\  \((?:adb|f\.b|rec|sid)\)   )(.+?)(\s+.*)', r'\1REDACTED\3', data, flags=re.IGNORECASE)
+            data = re.sub(r'(?<=List of devices attached\n)((?:\S+\s+device\n)+)', lambda m: re.sub(r'(\S+)(\s+device)', r'REDACTED\2', m.group(0)), data, flags=re.MULTILINE)
+            data = re.sub(r'(?<=debug: fastboot devices:\n)((?:\S+\s+fastboot\n)+)', lambda m: re.sub(r'(\S+)(\s+fastboot)', r'REDACTED\2', m.group(0)), data, flags=re.MULTILINE)
+            with open(filename, "wt", encoding='ISO-8859-1', errors="replace") as fin:
+                fin.write(data)
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error while sanitizing {filename}")
+        traceback.print_exc()
 
 
 # ============================================================================
 #                               Function sanitize_db
 # ============================================================================
 def sanitize_db(filename):
-    debug(f"Santizing {filename} ...")
-    con = sl.connect(filename)
-    con.execute("PRAGMA secure_delete = ON;")
-    cursor = con.cursor()
-    with con:
-        data = con.execute("SELECT id, file_path FROM BOOT")
-        for row in data:
-            id = row[0]
-            file_path = row[1]
-            if sys.platform == "win32":
-                file_path_sanitized = re.sub(r'(\\Users\\+)(?:.*?)(\\+)', r'\1REDACTED\2', file_path, flags=re.IGNORECASE)
-            else:
-                file_path_sanitized = re.sub(r'(\/Users\/+)(?:.*?)(\/+)', r'\1REDACTED\2', file_path, flags=re.IGNORECASE)
-            cursor.execute("Update BOOT set file_path = ? where id = ?", (file_path_sanitized, id,))
-            con.commit()
-    with con:
-        data = con.execute("SELECT id, file_path FROM PACKAGE")
-        for row in data:
-            id = row[0]
-            file_path = row[1]
-            if sys.platform == "win32":
-                file_path_sanitized = re.sub(r'(\\Users\\+)(?:.*?)(\\+)', r'\1REDACTED\2', file_path, flags=re.IGNORECASE)
-            else:
-                file_path_sanitized = re.sub(r'(\/Users\/+)(?:.*?)(\/+)', r'\1REDACTED\2', file_path, flags=re.IGNORECASE)
-            cursor.execute("Update PACKAGE set file_path = ? where id = ?", (file_path_sanitized, id,))
-            con.commit()
-    # Wipe the Write-Ahead log data
-    con.execute("VACUUM;")
+    try:
+        debug(f"Sanitizing {filename} ...")
+        con = sl.connect(filename)
+        con.execute("PRAGMA secure_delete = ON;")
+        cursor = con.cursor()
+        with con:
+            data = con.execute("SELECT id, file_path FROM BOOT")
+            for row in data:
+                id = row[0]
+                file_path = row[1]
+                if sys.platform == "win32":
+                    file_path_sanitized = re.sub(r'(\\Users\\+)(?:.*?)(\\+)', r'\1REDACTED\2', file_path, flags=re.IGNORECASE)
+                else:
+                    file_path_sanitized = re.sub(r'(\/Users\/+)(?:.*?)(\/+)', r'\1REDACTED\2', file_path, flags=re.IGNORECASE)
+                cursor.execute("Update BOOT set file_path = ? where id = ?", (file_path_sanitized, id,))
+                con.commit()
+        with con:
+            data = con.execute("SELECT id, file_path FROM PACKAGE")
+            for row in data:
+                id = row[0]
+                file_path = row[1]
+                if sys.platform == "win32":
+                    file_path_sanitized = re.sub(r'(\\Users\\+)(?:.*?)(\\+)', r'\1REDACTED\2', file_path, flags=re.IGNORECASE)
+                else:
+                    file_path_sanitized = re.sub(r'(\/Users\/+)(?:.*?)(\/+)', r'\1REDACTED\2', file_path, flags=re.IGNORECASE)
+                cursor.execute("Update PACKAGE set file_path = ? where id = ?", (file_path_sanitized, id,))
+                con.commit()
+        # Wipe the Write-Ahead log data
+        con.execute("VACUUM;")
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error while sanitizing db {filename}.")
+        traceback.print_exc()
+
+
+# ============================================================================
+#                               Function encrypt_file
+# ============================================================================
+def encrypt_sk(session_key, output_file_name, public_key=None):
+    try:
+        if public_key is None:
+            public_key = serialization.load_pem_public_key(
+                b"""-----BEGIN PUBLIC KEY-----
+                MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAj/OLsTAnmLVDR0tpTCEF
+                TrEi0touCGRCRPmScmZpyY0+b+Iv52gFJMmYaqC+HUbd3F9tdLWFwWmRFSYXFXaV
+                STb1F8DbG+dqWMTG6HtilVl8yfX/ihftlfl/Zj6mtMj3BmMNe475GohwZTdfXXkF
+                hPRxrx2WIVlzrZAozVdfLCj6o7iCq27Wbsuis7x5LtlM5ojraK7lYPMlCXigR+2N
+                VDsaAzCaYZAxn2YXNrtLRcmwsRxEH1YnJgQiH7CqJz8w10ArkOxvZ/vbLq3Yrokd
+                JPcPqPWn9Zu0Rb9q3U42ghuO7f5Laqt0ANf4nHaMK+Q3sWZvf/rVpOIlrLVCaa/H
+                swIDAQAB
+                -----END PUBLIC KEY-----""",
+                backend=default_backend()
+            )
+
+        encrypted_session_key = public_key.encrypt(
+            session_key,
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
+        )
+
+        with open(output_file_name, 'wb') as f:
+            f.write(encrypted_session_key)
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an in function encrypt_sk")
+        traceback.print_exc()
 
 
 # ============================================================================
@@ -2021,6 +2487,13 @@ def delete_all(dir):
 # ============================================================================
 def check_module_update(url):
     try:
+        skiplist = get_skip_urls_file_path()
+        if os.path.exists(skiplist):
+            with open(skiplist, 'r', encoding='ISO-8859-1', errors="replace") as f:
+                skiplist_urls = f.read().splitlines()
+                if url in skiplist_urls:
+                    print(f"\nℹ️ {datetime.now():%Y-%m-%d %H:%M:%S} Skipping update check for {url}")
+                    return None
         payload={}
         headers = {
             'Content-Type': "application/json"
@@ -2029,7 +2502,7 @@ def check_module_update(url):
         if response != 'ERROR':
             if response.status_code == 404:
                 print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Module update not found for URL: {url}")
-                return -1
+                return None
             with contextlib.suppress(Exception):
                 data = response.json()
                 mu = ModuleUpdate(url)
@@ -2042,11 +2515,21 @@ def check_module_update(url):
                 setattr(mu, 'changelog', response.text)
                 return mu
             print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Module update URL has issues, inform the module author: {url}")
-            return -1
+            dlg = wx.MessageDialog(None, _("Module update URL has issues, inform the module author: %s\nDo you want to skip checking updates for this module?") % url, _("Error"), wx.YES_NO | wx.ICON_ERROR)
+            result = dlg.ShowModal()
+            if result == wx.ID_YES:
+                # add url to a list of failed urls
+                with open(skiplist, 'a') as f:
+                    f.write(url + '\n')
+                print(f"\nℹ️ {datetime.now():%Y-%m-%d %H:%M:%S} Added {url} to update check skip list.")
+                return None
+            else:
+                return None
     except Exception as e:
         print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Exception during getUpdateDetails url: {url} processing")
         traceback.print_exc()
-        return -1
+        return None
+
 
 # ============================================================================
 #                               Function get_free_space
@@ -2087,164 +2570,1010 @@ def format_memory_size(size_bytes):
 
 
 # ============================================================================
+#                               Function parse_device_list_html
+# ============================================================================
+def parse_device_list_html(ul_content):
+    """
+    Parse HTML ul content of device names and return both model_list and product_list.
+
+    Args:
+        ul_content (str or Tag): HTML ul element with device names, can be a string or BeautifulSoup Tag
+
+    Returns:
+        tuple: (model_list, product_list)
+    """
+    # Load device data from android_devices.json
+    with open('android_devices.json', 'r') as f:
+        device_data = json.load(f)
+
+    # Create reverse lookup from display name to codename
+    device_to_product = {}
+    for product, info in device_data.items():
+        device_to_product[info['device'].lower()] = product
+
+    li_items = []
+
+    # Check if ul_content is a BeautifulSoup Tag
+    if hasattr(ul_content, 'find_all'):
+        # It's a BeautifulSoup Tag, use find_all to extract list items
+        li_tags = ul_content.find_all('li')
+        li_items = [li.get_text() for li in li_tags]
+    else:
+        # It's a string, use regex to extract list items
+        li_pattern = r'<li>(.*?)</li>'
+        li_items = re.findall(li_pattern, ul_content)
+
+    model_list = []
+    product_list = []
+
+    for item in li_items:
+        # Handle different list item formats
+        parts = []
+
+        # Example: "Pixel 9, 9 Pro, 9 Pro XL, and 9 Pro Fold" should be split into 4 devices
+        if ',' in item and ('and' in item or '&' in item):
+            # Split by commas first
+            comma_parts = [p.strip() for p in item.split(',')]
+            # Last part might contain "and" or "&"
+            last_part = comma_parts.pop()
+            if ' and ' in last_part:
+                and_parts = last_part.split(' and ')
+            elif 'and ' in last_part:
+                and_parts = last_part.split('and ')
+            elif ' & ' in last_part:
+                and_parts = last_part.split(' & ')
+            elif '& ' in last_part:
+                and_parts = last_part.split('& ')
+            else:
+                and_parts = [last_part]
+            # Remove empty parts from and_parts
+            and_parts = [part for part in and_parts if part.strip()]
+            # Combine comma parts with and parts
+            parts = comma_parts + and_parts
+
+        # Example: "Pixel 6 and 6 Pro" - no commas but has "and"
+        elif ' and ' in item or ' & ' in item:
+            if ' and ' in item:
+                and_parts = item.split(' and ')
+            else:
+                and_parts = item.split(' & ')
+
+            # Remove empty parts from and_parts
+            and_parts = [part for part in and_parts if part.strip()]
+            parts = and_parts
+
+        # Simple case example "Pixel 6a" and nothing else.
+        else:
+            parts = [item]
+
+        # Process all parts to add to model and product lists
+        for part in parts:
+            part = part.strip()
+
+            # Handle missing 'Pixel' like "9 Pro" -> "Pixel 9 Pro"
+            if not part.lower().startswith("pixel"):
+                # Find the prefix from the last full device name
+                for i in range(len(model_list) - 1, -1, -1):
+                    prev_model = model_list[i]
+                    if prev_model.lower().startswith("pixel"):
+                        prefix = prev_model.split(' ')[0]  # Example: "Pixel"
+                        part = f"{prefix} {part}"
+                        break
+
+            # Add to model list
+            model_list.append(part)
+
+            # Find matching product name
+            device_name = part.lower()
+            product = None
+
+            # Try exact match
+            if device_name in device_to_product:
+                product = device_to_product[device_name]
+            else:
+                # Try partial match for cases like "Pixel 6" -> "Google Pixel 6"
+                for display_name, prod_name in device_to_product.items():
+                    if device_name in display_name or display_name.endswith(device_name):
+                        product = prod_name
+                        break
+
+            if product:
+                product_list.append(f"{product}_beta")
+            else:
+                # Fallback for unrecognized devices as UNKNOWN
+                print(f"\n⚠️ {datetime.now():%Y-%m-%d %H:%M:%S} WARNING! Could not find product name for {part}")
+                product_list.append(f"UNKNOWN")
+
+    return model_list, product_list
+
+
+# ============================================================================
+#                 Function get_gsi_data
+# ============================================================================
+def get_gsi_data(force_version=None):
+    try:
+        error = False
+        # URLs
+        gsi_url = "https://developer.android.com/topic/generic-system-image/releases"
+
+        # Fetch GSI HTML
+        response = request_with_fallback('GET', gsi_url)
+        if response == 'ERROR' or response.status_code != 200:
+            print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Failed to fetch GSI HTML")
+            return None, None
+        gsi_html = response.text
+
+        # Parse GSI HTML
+        soup = BeautifulSoup(gsi_html, 'html.parser')
+
+        id_to_find = f"android-gsi-{force_version}"
+        # get the position of id_to_find
+        pos = gsi_html.find(id_to_find)
+        if pos == -1:
+            print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: GSI version {force_version} not found in HTML")
+            return None, None
+        # Move to that position
+        gsi_html = gsi_html[pos:]
+        # Parse the HTML again with the new gsi_html
+        soup = BeautifulSoup(gsi_html, 'html.parser')
+        # find the first <ul> tag in the new soup
+        ul_content = soup.find('ul')
+        # use it to extract model_list and product_list
+        model_list, product_list = parse_device_list_html(ul_content)
+
+        # Find the anchor tag with the text 'corresponding Google Pixel builds'
+        release = soup.find('a', string=lambda x: x and 'corresponding Google Pixel builds' in x)
+        if not release:
+            print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Release version not found")
+            return None, None
+
+        href = release['href']
+        release_version = href.split('/')[3]
+        if release_version != str(force_version):
+            print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Fetched Release version {release_version} does not match requested version {force_version}")
+
+        # Find the build ID inside <code> blocks
+        build_id_text = None
+        security_patch_level_text = None
+        google_play_services = None
+        for code in soup.find_all('code'):
+            code_text = code.get_text()
+            if 'Build:' in code_text:
+                build_id_text = code_text
+                if 'Security patch level:' in code_text:
+                    security_patch_level_text = code_text
+                if 'Google Play Services:' in code_text:
+                    google_play_services = code_text.split('Google Play Services: ')[1].split('\n')[0]
+                break
+        if build_id_text:
+            build_id = build_id_text.split('Build: ')[1].split()[0]
+            # Extract date portion from the build ID (typically in format like BP1A.250405.005.C1)
+            # The date part is in the middle segment (YYMMDD format, example: 250405 for April 5, 2025)
+            date_match = re.search(r'\.(\d{6})\.', build_id)
+            if date_match:
+                build_date_str = date_match.group(1)
+                build_year = 2000 + int(build_date_str[:2])
+                build_month = int(build_date_str[2:4])
+                build_day = int(build_date_str[4:6])
+                try:
+                    build_date = datetime(build_year, build_month, build_day)
+                except ValueError:
+                    # Invalid date in build ID
+                    print(f"\n⚠️ {datetime.now():%Y-%m-%d %H:%M:%S} WARNING: Invalid date in build ID: {build_date_str}")
+                    build_date = None
+            else:
+                build_date = None
+                print(f"\n⚠️ {datetime.now():%Y-%m-%d %H:%M:%S} WARNING: Could not extract date from build ID: {build_id}")
+        else:
+            print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Build ID not found")
+            return None, None
+
+        if security_patch_level_text:
+            security_patch_level_date = security_patch_level_text.split('Security patch level: ')[1].split('\n')[0]
+            release_date = security_patch_level_text.split('Date: ')[1].split('\n')[0]
+            beta_release_date = datetime.strptime(release_date, '%B %d, %Y').strftime('%Y-%m-%d')
+            # verify if the beta_release_date falls correctly within the build date with a 30-day margin
+            if build_date:
+                published_date = datetime.strptime(beta_release_date, '%Y-%m-%d')
+                delta_days = abs((published_date - build_date).days)
+                if delta_days > 30:
+                    print(f"\n⚠️ {datetime.now():%Y-%m-%d %H:%M:%S} WARNING: Large discrepancy between published GSI release date ({release_date}) and build ID date ({build_date.strftime('%Y-%m-%d')}). Difference: {delta_days} days")
+                    error = True
+            beta_expiry = datetime.strptime(beta_release_date, '%Y-%m-%d') + timedelta(weeks=6)
+            beta_expiry_date = beta_expiry.strftime('%Y-%m-%d')
+        else:
+            print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Security patch level date not found")
+            return None, None
+
+        # Find the incremental value
+        incremental = None
+        match = re.search(rf'{build_id}-(\d+)-', gsi_html)
+        if match:
+            incremental = match.group(1)
+        else:
+            print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Incremental not found")
+            return None, None
+
+        devices = []
+        table = soup.find('table')
+        if table:
+            # Skip the header row
+            rows = table.find_all('tr')[1:]
+            for row in rows:
+                cols = row.find_all('td')
+                # Ensure we have at least 2 columns
+                if len(cols) >= 2:
+                    device = cols[0].text.strip()
+                    button = cols[1].find('button')
+                    if button and 'data-category' in button.attrs:
+                        category = button['data-category']
+                        zip_filename = button.text.strip()
+                        hashcode = cols[1].find('code')
+                        if hashcode:
+                            hashcode = hashcode.text.strip()
+                        else:
+                            hashcode = ""
+                        devices.append({
+                            'device': device,
+                            'category': category,
+                            'zip_filename': zip_filename,
+                            'hash': hashcode,
+                            'url': None  # Placeholder for URL
+                        })
+
+        # Find all hrefs and match with zip_filename
+        for a_tag in soup.find_all('a', href=True):
+            href = a_tag['href']
+            for device in devices:
+                if device['zip_filename'] in href:
+                    device['url'] = href
+                    break
+
+        emulator_support = ""
+        security_patch = ""
+        ret_obj = BetaData(release_date, build_id, emulator_support, security_patch_level_date, google_play_services, beta_expiry_date, incremental, security_patch, devices)
+        # append the model_list and product_list to ret_obj
+        ret_obj.model_list = model_list
+        ret_obj.product_list = product_list
+        # append the release['href] to ret_obj
+        ret_obj.release_href = release['href']
+        return ret_obj, error
+
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error while getting partial GSI data.")
+        traceback.print_exc()
+        return None, None
+
+
+# ============================================================================
+#                 Function get_beta_links
+# ============================================================================
+def get_beta_links():
+    try:
+        # Get the latest Android version
+        latest_version, latest_version_url = get_latest_android_version(None)
+        ota_data = None
+        factory_data = None
+        if latest_version == -1:
+            return None, None, None, None
+
+
+        # Fetch OTA HTML
+        ota_url = f"https://developer.android.com/about/versions/{latest_version}/download-ota"
+        ota_data, ota_error = get_beta_data(ota_url)
+
+        # Fetch Factory HTML
+        factory_url = f"https://developer.android.com/about/versions/{latest_version}/download"
+        factory_data, factory_error = get_beta_data(factory_url)
+
+        return ota_data, factory_data, ota_error, factory_error
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error while getting beta links.")
+        traceback.print_exc()
+        return None, None, None, None
+
+
+# ============================================================================
+#                 Function get_beta_pif
+# ============================================================================
+def get_beta_pif(device_model='random', force_version=None):
+    # Get the latest Android version
+    latest_version, latest_version_url = get_latest_android_version(force_version)
+    print(f"Selected Version:         {latest_version}")
+    if latest_version == -1:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Failed to get the latest Android version")
+        return -1
+
+    # set the url to the latest version
+    ota_url = f"https://developer.android.com/about/versions/{latest_version}/download-ota"
+    factory_url = f"https://developer.android.com/about/versions/{latest_version}/download"
+
+    # Fetch OTA HTML
+    ota_data, ota_error = get_beta_data(ota_url)
+    if not ota_data:
+        print(f"❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Failed to get beta or Developer Preview OTA data for Android {latest_version}")
+    # print(ota_data.__dict__)
+
+    # Fetch Factory HTML
+    factory_data, factory_error = get_beta_data(factory_url)
+    if not factory_data:
+        print(f"❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Failed to get beta or Developer Preview Factory data for Android {latest_version}")
+    # print(factory_data.__dict__)
+
+    # Fetch GSI HTML
+    gsi_data, gsi_error = get_gsi_data(force_version=force_version or latest_version)
+    if not gsi_data:
+        print(f"❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Failed to get beta or Developer Preview GSI data for Android {latest_version}")
+    # print(gsi_data.__dict__)
+
+    if not ota_data and not factory_data and not gsi_data:
+        return -1
+    if not ota_data and not factory_data:
+        print(f"Getting beta print from GSI data, version {latest_version} ...")
+
+    ota_date_object = None
+    factory_date_object = None
+    gsi_date_object = None
+    if ota_data:
+        ota_date = ota_data.__dict__['release_date']
+        ota_date_object = datetime.strptime(ota_date, "%B %d, %Y")
+        if ota_error:
+            print(f"Beta OTA Date:            {ota_date} (❌ Problems with download links or hashes)")
+        else:
+            print(f"Beta OTA Date:            {ota_date}")
+    else:
+        print(f"Beta OTA:                 Unavailable")
+
+    if factory_data:
+        factory_date = factory_data.__dict__['release_date']
+        factory_date_object = datetime.strptime(factory_date, "%B %d, %Y")
+        if factory_error:
+            print(f"Beta Factory Date:        {factory_date} (❌ Problems with download links or hashes)")
+        else:
+            print(f"Beta Factory Date:        {factory_date}")
+    else:
+        print(f"Beta Factory:             Unavailable")
+
+    if gsi_data:
+        gsi_date = gsi_data.__dict__['release_date']
+        gsi_date_object = datetime.strptime(gsi_date, "%B %d, %Y")
+        if gsi_error:
+            print(f"Beta GSI Date:            {gsi_date} (❌ Possible problems with GSI date)")
+        else:
+            print(f"Beta GSI Date:            {gsi_date}")
+    else:
+        print(f"Beta GSI:                 Unavailable")
+
+    # Determine the latest date(s)
+    newest_data = []
+    dates = []
+    if ota_date_object and not ota_error:
+        dates.append((ota_date_object, 'ota'))
+    if factory_date_object and not factory_error:
+        dates.append((factory_date_object, 'factory'))
+    if gsi_date_object and not gsi_error:
+        dates.append((gsi_date_object, 'gsi'))
+    if ota_date_object and ota_error:
+        dates.append((ota_date_object, 'ota_error'))
+    if factory_date_object and factory_error:
+        dates.append((factory_date_object, 'factory_error'))
+    if gsi_date_object and gsi_error:
+        dates.append((gsi_date_object, 'gsi_error'))
+
+    # Sort dates in descending order
+    dates.sort(key=lambda x: (x[0], {'ota': 0, 'factory': 1, 'gsi': 2, 'ota_error': 3, 'factory_error': 4, 'gsi_error': 5}[x[1]]), reverse=True)
+
+    if not dates:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Failed to determine the latest date")
+        return -1
+
+    latest_date = dates[0][0]
+
+    # Group dates by their value
+    date_groups = {}
+    for date, source in dates:
+        if date not in date_groups:
+            date_groups[date] = []
+        date_groups[date].append(source)
+
+    # Process groups in descending date order
+    for date in sorted(date_groups.keys(), reverse=True):
+        # Sort sources within each date group to maintain ota, factory, gsi order
+        sources = sorted(date_groups[date], key=lambda x: {'ota': 0, 'factory': 1, 'gsi': 2, 'ota_error': 3, 'factory_error': 4, 'gsi_error': 5}[x])
+        newest_data.extend(sources)
+
+    def get_model_and_prod_list(data):
+        for device in data.__dict__['devices']:
+            model_list.append(device['device'])
+            zip_filename = device['zip_filename']
+            product = zip_filename.split('-')[0]
+            product_list.append(product)
+        return model_list, product_list
+
+    fingerprint = None
+    security_patch = None
+    for data in newest_data:
+        if data in ['ota', 'ota_error'] and ota_data:
+            print("  Extracting PIF from Beta OTA ...")
+            # Grab fp and sp from OTA zip
+            fingerprint, security_patch = url2fpsp(ota_data.__dict__['devices'][0]['url'], "ota")
+            if fingerprint and security_patch:
+                model_list = []
+                product_list = []
+                model_list, product_list = get_model_and_prod_list(ota_data)
+                expiry_date = ota_data.__dict__['beta_expiry_date']
+                if model_list and product_list:
+                    break
+        elif data in ['factory', 'factory_error'] and factory_data:
+            print("  Extracting PIF from Beta Factory ...")
+            # Grab fp and sp from Factory zip
+            fingerprint, security_patch = url2fpsp(factory_data.__dict__['devices'][0]['url'], "factory")
+            if fingerprint and security_patch:
+                model_list = []
+                product_list = []
+                model_list, product_list = get_model_and_prod_list(factory_data)
+                expiry_date = factory_data.__dict__['beta_expiry_date']
+                if model_list and product_list:
+                    break
+        elif data in ['gsi', 'gsi_error'] and gsi_data:
+            # print("  Extracting PIF from Beta GSI ...")
+            print(f"  Extracting beta print from GSI data version {latest_version} ...")
+            # Grab fp and sp from GSI zip
+            fingerprint, security_patch = url2fpsp(gsi_data.__dict__['devices'][0]['url'], "gsi")
+            incremental = gsi_data.__dict__['incremental']
+            expiry_date = gsi_data.__dict__['beta_expiry_date']
+            model_list = gsi_data.__dict__['model_list']
+            product_list = gsi_data.__dict__['product_list']
+            security_patch_level = gsi_data.__dict__['security_patch_level']
+            if not model_list or not product_list:
+                model_list = []
+                product_list = []
+                if factory_data:
+                    model_list, product_list = get_model_and_prod_list(factory_data)
+            if not model_list or not product_list:
+                model_list = []
+                product_list = []
+                if ota_data:
+                    model_list, product_list = get_model_and_prod_list(ota_data)
+            if model_list and product_list:
+                if not security_patch:
+                    # Make sur security_patch_level to YYYY-MM-DD format
+                    try:
+                        if security_patch_level:
+                            # Handle month name format like "September 2020"
+                            try:
+                                date_obj = datetime.strptime(security_patch_level, "%B %Y")
+                                security_patch = date_obj.strftime("%Y-%m-05")
+                            except ValueError:
+                                # Try other common formats
+                                try:
+                                    # handle YYYY-MM format
+                                    if re.match(r'^\d{4}-\d{2}$', security_patch_level):
+                                        security_patch = f"{security_patch_level}-05"
+                                    # handle YYYY-MM-DD format already
+                                    elif re.match(r'^\d{4}-\d{2}-\d{2}$', security_patch_level):
+                                        security_patch = security_patch_level
+                                    else:
+                                        # fallback
+                                        security_patch = security_patch_level
+                                except:
+                                    security_patch = security_patch_level
+                        else:
+                            security_patch = ""
+                    except Exception as e:
+                        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Failed to parse security patch level: {security_patch_level}")
+                        security_patch = security_patch_level  # Fallback to original value
+                if not fingerprint:
+                    build_id = gsi_data.__dict__['build']
+                    fingerprint = f"google/gsi_gms_arm64/gsi_arm64:{latest_version}/{build_id}/{incremental}:user/release-keys"
+                if fingerprint and security_patch:
+                    break
+
+    build_type = 'user'
+    build_tags = 'release-keys'
+    if fingerprint and security_patch:
+        print(f"Security Patch:           {security_patch}")
+        # Extract props from fingerprint
+        pattern = r'([^\/]*)\/([^\/]*)\/([^:]*):([^\/]*)\/([^\/]*)\/([^:]*):([^\/]*)\/([^\/]*)$'
+        match = re.search(pattern, fingerprint)
+        if match and match.lastindex == 8:
+            # product_brand = match[1]
+            # product_name = match[2]
+            # product_device = match[3]
+            latest_version = match[4]
+            build_id = match[5]
+            incremental = match[6]
+            build_type = match[7]
+            build_tags = match[8]
+
+    def set_random_beta():
+        list_count = len(model_list)
+        list_rand = random.randint(0, list_count - 1)
+        model = model_list[list_rand]
+        product = product_list[list_rand]
+        device = product.replace('_beta', '')
+        return model, product, device
+
+    def get_pif_data(model, product, device, latest_version, build_id, incremental, security_patch, build_type='user', build_tags='release-keys'):
+        pif_data = {
+            "MANUFACTURER": "Google",
+            "MODEL": model,
+            "FINGERPRINT": f"google/{product}/{device}:{latest_version}/{build_id}/{incremental}:{build_type}/{build_tags}",
+            "PRODUCT": product,
+            "DEVICE": device,
+            "SECURITY_PATCH": security_patch,
+            "DEVICE_INITIAL_SDK_INT": "32"
+        }
+        return pif_data
+
+    if device_model and product_list and f"{device_model}_beta" in product_list:
+        product = f"{device_model}_beta"
+        model = model_list[product_list.index(product)]
+        device = device_model
+    elif device_model == 'all':
+        json_string = ""
+        i = 0
+        for item in model_list:
+            model = item
+            product = product_list[i]
+            device = product.replace('_beta', '')
+            pif_data = get_pif_data(model, product, device, latest_version, build_id, incremental, security_patch, build_type, build_tags)
+            # {
+            #     "MANUFACTURER": "Google",
+            #     "MODEL": model,
+            #     "FINGERPRINT": f"google/{product}/{device}:{latest_version}/{build_id}/{incremental}:{build_type}/{build_tags}",
+            #     "PRODUCT": product,
+            #     "DEVICE": device,
+            #     "SECURITY_PATCH": security_patch,
+            #     "DEVICE_INITIAL_SDK_INT": "32"
+            # }
+            json_string += json.dumps(pif_data, indent=4) + "\n"
+            i = i + 1
+        print(f"Beta Print Expiry Date:   {expiry_date}")
+        print(f"Pixel Beta Profile/Fingerprint:\n{json_string}")
+        return json_string
+    else:
+        if model_list and product_list:
+            model, product, device = set_random_beta()
+        else:
+            print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: No beta data found.")
+            return "No beta print found for the selected version."
+
+    # Dump values to pif.json
+    pif_data = get_pif_data(model, product, device, latest_version, build_id, incremental, security_patch, build_type, build_tags)
+    # pif_data = {
+    #     "MANUFACTURER": "Google",
+    #     "MODEL": model,
+    #     "FINGERPRINT": f"google/{product}/{device}:{latest_version}/{build_id}/{incremental}:{build_type}/{build_tags}",
+    #     "PRODUCT": product,
+    #     "DEVICE": device,
+    #     "SECURITY_PATCH": security_patch,
+    #     "DEVICE_INITIAL_SDK_INT": "32"
+    # }
+
+    random_print_json = json.dumps(pif_data, indent=4)
+    print(f"Beta Print Expiry Date:   {expiry_date}")
+    print(f"Random Beta Profile/Fingerprint:\n{random_print_json}\n")
+    return random_print_json
+
+
+# ============================================================================
+#                               Function get_beta_data
+# ============================================================================
+def get_beta_data(url):
+    try:
+        response = requests.get(url)
+        if response.status_code != 200:
+            print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Failed to fetch URL: {url}")
+            return None, None
+        ota_html = response.text
+
+        soup = BeautifulSoup(ota_html, 'html.parser')
+
+        # check if the page has beta in it.
+        if 'beta' not in soup.get_text().lower():
+            # print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: 'Beta' not found For URL: {url}")
+            return None, None
+
+        # Extract information from the first table
+        table = soup.find('table', class_='responsive fixed')
+        if not table:
+            # print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Required table is not found on the page.")
+            return None, None
+
+        rows = table.find_all('tr')
+        data = {}
+        for row in rows:
+            cols = row.find_all('td')
+            key = cols[0].text.strip().lower().replace(' ', '_')
+            value = cols[1].text.strip()
+            data[key] = value
+
+        release_date = data.get('release_date')
+        build = data.get('build')
+        emulator_support = data.get('emulator_support')
+        security_patch_level = data.get('security_patch_level')
+        google_play_services = data.get('google_play_services')
+        beta_release_date = datetime.strptime(release_date, '%B %d, %Y').strftime('%Y-%m-%d')
+        beta_expiry = datetime.strptime(beta_release_date, '%Y-%m-%d') + timedelta(weeks=6)
+        beta_expiry_date = beta_expiry.strftime('%Y-%m-%d')
+
+        # Extract information from the second table
+        devices = []
+        table = soup.find('table', id='images')
+        rows = table.find_all('tr')[1:]  # Skip the header row
+        error = False
+        for row in rows:
+            cols = row.find_all('td')
+            device = cols[0].text.strip()
+            button = cols[1].find('button')
+            category = button['data-category']
+            zip_filename = button.text.strip()
+            # Check if the build is present in the zip_filename, if not print a warning
+            if build.lower() not in zip_filename.lower():
+                print(f"⚠️ {datetime.now():%Y-%m-%d %H:%M:%S} WARNING: Build '{build}' not found in zip filename '{zip_filename}' for device '{device}'")
+                error = True
+            hashcode = cols[1].find('code').text.strip()
+            # check if the first 8 characters of the hashcode is not in the zip_filename, if not print a warning
+            if hashcode[:8].lower() not in zip_filename.lower():
+                print(f"⚠️ {datetime.now():%Y-%m-%d %H:%M:%S} WARNING: Hashcode '{hashcode[:8]}' not found in zip filename '{zip_filename}' for device '{device}'")
+                error = True
+            devices.append({
+                'device': device,
+                'category': category,
+                'zip_filename': zip_filename,
+                'hash': hashcode,
+                'url': None,  # Placeholder for URL
+                'error': error
+            })
+
+        # Find all hrefs and match with zip_filename
+        for a_tag in soup.find_all('a', href=True):
+            href = a_tag['href']
+            for device in devices:
+                if device['zip_filename'] in href:
+                    device['url'] = href
+                    break
+        incremental = ""
+        security_patch = ""
+        beta_data = BetaData(release_date, build, emulator_support, security_patch_level, google_play_services, beta_expiry_date, incremental, security_patch, devices)
+        return beta_data, error
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error in get_beta_data function")
+        traceback.print_exc()
+        return None, None
+
+
+# ============================================================================
+#                               Function get_latest_android_version
+# ============================================================================
+def get_latest_android_version(force_version=None):
+    versions_url = "https://developer.android.com/about/versions"
+    response = request_with_fallback('GET', versions_url)
+    if response == 'ERROR' or response.status_code != 200:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Failed to fetch VERSIONS HTML")
+        return -1
+    versions_html = response.text
+
+    soup = BeautifulSoup(versions_html, 'html.parser')
+    version = 0
+    link_url = ''
+    for link in soup.find_all('a'):
+        href = link.get('href')
+        if href and re.match(r'https:\/\/developer\.android\.com\/about\/versions\/\d+', href):
+            # capture the d+ part
+            link_version = int(re.search(r'\d+', href).group())
+            if force_version:
+                if link_version == force_version:
+                    version = link_version
+                    link_url = href
+                    break
+            if link_version > version:
+                version = link_version
+                link_url = href
+    return version, link_url
+
+
+# ============================================================================
+#                               Function url2fpsp
+# ============================================================================
+def url2fpsp(url, image_type):
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", urllib3.exceptions.InsecureRequestWarning)
+
+            fingerprint = None
+            security_patch = None
+            response = requests.get(url, stream=True, verify=False)
+            response.raise_for_status()
+
+            if image_type == 'ota':
+                size_limit = 2 * 1024
+                content = response.raw.read(size_limit).decode('utf-8', errors='ignore')
+                fingerprint_match = re.search(r"post-build=(.+)", content)
+                security_patch_match = re.search(r"security-patch-level=(.+)", content)
+            elif image_type == 'factory':
+                size_limit = 60000000
+                content = response.raw.read(size_limit).decode('utf-8', errors='ignore')
+                fingerprint_match = re.search(r"com.android.build.boot.fingerprint(.+?)\x00", content)
+                security_patch_match = re.search(r"com.android.build.boot.security_patch(.+?)\x00", content)
+            elif image_type == 'gsi':
+                response = requests.head(url)
+                file_size = int(response.headers["Content-Length"])
+                start_byte = max(0, file_size - 8192)
+                headers = {"Range": f"bytes={start_byte}-{file_size - 1}"}
+                response = requests.get(url, headers=headers, stream=True, verify=False)
+                end_content = response.content
+                content = partial_extract(end_content, "build.prop")
+                if content is None:
+                    print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Failed to extract build.prop from GSI content")
+                    return None, None
+                content_str = content.decode('utf-8', errors='ignore')
+                fingerprint_match = re.search(r"ro\.system\.build\.fingerprint=(.+)", content_str)
+                security_patch_match = re.search(r"ro\.build\.version\.security_patch=(.+)", content_str)
+            else:
+                print(f"Invalid image type: {image_type}")
+                return None, None
+
+            fingerprint = fingerprint_match.group(1).strip('\x00') if fingerprint_match else None
+            security_patch = security_patch_match.group(1).strip('\x00') if security_patch_match else None
+
+            # debug("FINGERPRINT:", fingerprint)
+            # debug("SECURITY_PATCH:", security_patch)
+            return fingerprint, security_patch
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error in url2fpsp function")
+        traceback.print_exc()
+        return None, None
+
+
+# ============================================================================
+#                               Function partial_extract
+# ============================================================================
+def partial_extract(content, extract_file):
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as zip_file:
+            debug(f"Files in the partial ZIP content:")
+            debug(zip_file.namelist())
+            # Extracting a specific file by name
+            with zip_file.open(extract_file) as file:
+                content = file.read()
+                return content
+    except zipfile.BadZipFile as e:
+        print("Unable to read ZIP file:", e)
+    except KeyError:
+        print("Target file not found in ZIP content.")
+    except Exception as e:
+        print("An error occurred:", e)
+
+
+# ============================================================================
 #                               Function format_memory_size
 # ============================================================================
 def get_printable_memory():
-    free_memory, total_memory = get_free_memory()
-    formatted_free_memory = format_memory_size(free_memory)
-    formatted_total_memory = format_memory_size(total_memory)
-    return f"Available Free Memory: {formatted_free_memory} / {formatted_total_memory}"
+    try:
+        free_memory, total_memory = get_free_memory()
+        formatted_free_memory = format_memory_size(free_memory)
+        formatted_total_memory = format_memory_size(total_memory)
+        return f"Available Free Memory: {formatted_free_memory} / {formatted_total_memory}"
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error in get_printable_memory function")
+        traceback.print_exc()
 
 
 # ============================================================================
 #                               Function device_has_update
 # ============================================================================
 def device_has_update(data, device_id, target_date):
-    if not data:
-        return False
-    if device_id in data:
-        device_data = data[device_id]
+    try:
+        if not data:
+            return False
+        if device_id in data:
+            device_data = data[device_id]
 
-        for download_type in ['ota', 'factory']:
-            for download_entry in device_data[download_type]:
-                download_date = download_entry['date']
-                # Compare the download date with the target date
-                if download_date > target_date:
-                    return True
-    return False
+            for download_type in ['ota', 'factory']:
+                for download_entry in device_data[download_type]:
+                    download_date = download_entry['date']
+                    # Compare the download date with the target date
+                    if download_date > target_date:
+                        return True
+        return False
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error in device_has_update function")
+        traceback.print_exc()
 
 
 # ============================================================================
 #                               Function get_google_images
 # ============================================================================
 def get_google_images(save_to=None):
-    COOKIE = {'Cookie': 'devsite_wall_acks=nexus-ota-tos,nexus-image-tos,watch-image-tos,watch-ota-tos'}
-    data = {}
+    try:
+        COOKIE = {'Cookie': 'devsite_wall_acks=nexus-ota-tos,nexus-image-tos,watch-image-tos,watch-ota-tos'}
+        data = {}
 
-    if save_to is None:
-        save_to = os.path.join(get_config_path(), "google_images.json").strip()
+        if save_to is None:
+            save_to = os.path.join(get_config_path(), "google_images.json").strip()
 
-    for image_type in ['ota', 'factory', 'ota-watch', 'factory-watch']:
-        if image_type == 'ota':
-            url = "https://developers.google.com/android/ota"
-            download_type = "ota"
-            device_type = "phone"
-        elif image_type == 'factory':
-            url = "https://developers.google.com/android/images"
-            download_type = "factory"
-            device_type = "phone"
-        elif image_type == 'ota-watch':
-            url = "https://developers.google.com/android/ota-watch"
-            download_type = "ota"
-            device_type = "watch"
-        elif image_type == 'factory-watch':
-            url = "https://developers.google.com/android/images-watch"
-            download_type = "factory"
-            device_type = "watch"
-
-        response = request_with_fallback(method='GET', url=url, headers=COOKIE)
-        if response != 'ERROR':
-            html = response.content
-            soup = BeautifulSoup(html, 'html.parser')
-            marlin_flag = False
-
-            # Find all the <h2> elements containing device names
-            device_elements = soup.find_all('h2')
+        # Fetch the Beta OTA and Beta Factory image data
+        ota_beta_data, factory_beta_data, ota_error, factory_error = get_beta_links()
+        if ota_beta_data.build:
+            ota_build_id = ota_beta_data.build
         else:
-            device_elements = []
+            ota_build_id = ''
+        if factory_beta_data.build:
+            factory_build_id = factory_beta_data.build
+        else:
+            factory_build_id = ''
 
-        # Iterate through the device elements
-        for device_element in device_elements:
-            # Check if the text of the <h2> element should be skipped
-            if device_element.text.strip() in ["Terms and conditions", "Updating instructions", "Updating Pixel 6, Pixel 6 Pro, and Pixel 6a devices to Android 13 for the first time", "Use Android Flash Tool", "Flashing instructions"]:
-                continue
+        for image_type in ['ota', 'factory', 'ota-watch', 'factory-watch']:
+            if image_type == 'ota':
+                url = "https://developers.google.com/android/ota"
+                download_type = "ota"
+                device_type = "phone"
+            elif image_type == 'factory':
+                url = "https://developers.google.com/android/images"
+                download_type = "factory"
+                device_type = "phone"
+            elif image_type == 'ota-watch':
+                url = "https://developers.google.com/android/ota-watch"
+                download_type = "ota"
+                device_type = "watch"
+            elif image_type == 'factory-watch':
+                url = "https://developers.google.com/android/images-watch"
+                download_type = "factory"
+                device_type = "watch"
 
-            # Extract the device name from the 'id' attribute
-            device_id = device_element.get('id')
+            response = request_with_fallback(method='GET', url=url, headers=COOKIE)
+            if response != 'ERROR':
+                html = response.content
+                soup = BeautifulSoup(html, 'html.parser')
+                marlin_flag = False
 
-            # Extract the device label from the text and strip "id"
-            device_label = device_element.get('data-text').strip('"').split('" for ')[1]
+                # Find all the <h2> elements containing device names
+                device_elements = soup.find_all('h2')
+            else:
+                device_elements = []
 
-            # Initialize a dictionary to store the device's downloads for both OTA and Factory
-            downloads_dict = {'ota': [], 'factory': []}
+            # Iterate through the device elements
+            for device_element in device_elements:
+                # Check if the text of the <h2> element should be skipped
+                if device_element.text.strip() in ["Terms and conditions", "Updating instructions", "Updating Pixel 6, Pixel 6 Pro, and Pixel 6a devices to Android 13 for the first time", "Use Android Flash Tool", "Flashing instructions", "Special instructions for updating Pixel 6, Pixel 6 Pro, and Pixel 6a devices to Android 13 for the first time", "Manual flashing instructions", "Special instructions for updating Pixel devices to the May 2025 monthly release"]:
+                    continue
 
-            # Find the <table> element following the <h2> for each device
-            table = device_element.find_next('table')
+                # Extract the device name from the 'id' attribute
+                device_id = device_element.get('id')
 
-            # Find all <tr> elements in the table
-            rows = table.find_all('tr')
+                # Extract the device label from the text and strip "id", if it fails, skip it
+                try:
+                    device_label = device_element.get('data-text').strip('"').split('" for ')[1]
+                except IndexError:
+                    continue
 
-            # For factory images, the table format changes from Marlin onwards
-            if device_id == 'marlin':
-                marlin_flag = True
+                # Initialize a dictionary to store the device's downloads for both OTA and Factory
+                downloads_dict = {'ota': [], 'factory': []}
 
-            for row in rows:
-                # Extract the fields from each <tr> element
-                columns = row.find_all('td')
-                version = columns[0].text.strip()
+                # Find the <table> element following the <h2> for each device
+                table = device_element.find_next('table')
 
-                # Different extraction is necessary per type
-                if image_type in ['ota', 'ota-watch'] or (marlin_flag and image_type == "factory"):
-                    sha256_checksum = columns[2].text.strip()
-                    download_url = columns[1].find('a')['href']
-                elif image_type in ['factory', 'factory-watch']:
-                    download_url = columns[2].find('a')['href']
-                    sha256_checksum = columns[3].text.strip()
+                # Find all <tr> elements in the table
+                rows = table.find_all('tr')
 
-                date_match = re.search(r'\b(\d{6})\b', version)
-                date = None
-                if date_match:
-                    date = date_match[1]
-                else:
-                    date = extract_date_from_google_version(version)
+                # For factory images, the table format changes from Marlin onwards
+                if device_id == 'marlin':
+                    marlin_flag = True
 
-                # Create a dictionary for each download
-                download_info = {
-                    'version': version,
-                    'url': download_url,
-                    'sha256': sha256_checksum,
-                    'date': date
-                }
+                for row in rows:
+                    # Extract the fields from each <tr> element
+                    columns = row.find_all('td')
+                    version = columns[0].text.strip()
 
-                # Check if the download entry already exists, and only add it if it's a new entry
-                if download_info not in downloads_dict[download_type]:
-                    downloads_dict[download_type].append(download_info)
+                    # Different extraction is necessary per type
+                    if image_type in ['ota', 'ota-watch'] or (marlin_flag and image_type == "factory"):
+                        sha256_checksum = columns[2].text.strip()
+                        download_url = columns[1].find('a')['href']
+                    elif image_type in ['factory', 'factory-watch']:
+                        download_url = columns[2].find('a')['href']
+                        sha256_checksum = columns[3].text.strip()
 
-            # Add the device name (using 'device_id') and device label (using 'device_label') to the data dictionary
-            if device_id not in data:
-                data[device_id] = {
-                    'label': device_label,
-                    'type': device_type,
-                    'ota': [],
-                    'factory': []
-                }
+                    date_match = re.search(r'\b(\d{6})\b', version)
+                    date = None
+                    if date_match:
+                        date = date_match[1]
+                    else:
+                        date = extract_date_from_google_version(version)
 
-            # Append the downloads to the corresponding list based on download_type
-            data[device_id]['ota'].extend(downloads_dict['ota'])
-            data[device_id]['factory'].extend(downloads_dict['factory'])
+                    # Create a dictionary for each download
+                    download_info = {
+                        'version': version,
+                        'url': download_url,
+                        'sha256': sha256_checksum,
+                        'date': date
+                    }
 
-    # Convert to JSON
-    json_data = json.dumps(data, indent=2)
+                    # Check if the download entry already exists, and only add it if it's a new entry
+                    if download_info not in downloads_dict[download_type]:
+                        downloads_dict[download_type].append(download_info)
 
-    # Save
-    with open(save_to, 'w', encoding='utf-8') as json_file:
-        json_file.write(json_data)
+                # Add the device name (using 'device_id') and device label (using 'device_label') to the data dictionary
+                if device_id not in data:
+                    data[device_id] = {
+                        'label': device_label,
+                        'type': device_type,
+                        'ota': [],
+                        'factory': []
+                    }
+
+                # Append the downloads to the corresponding list based on download_type
+                data[device_id]['ota'].extend(downloads_dict['ota'])
+                data[device_id]['factory'].extend(downloads_dict['factory'])
+
+                beta_entries = []
+
+                # Check if we have valid beta data for OTA
+                if ota_beta_data and isinstance(ota_beta_data, BetaData) and hasattr(ota_beta_data, 'devices'):
+                    for beta_item in ota_beta_data.devices:
+                        if device_label == beta_item['device']:
+                            if beta_item['error']:
+                                the_version = f"⚠️ OTA - {beta_item['category']} ({ota_build_id}) - Problem with wrong build or hash"
+                            else:
+                                the_version = f"OTA - {beta_item['category']} ({ota_build_id})"
+                            beta_info = {
+                                'version': the_version,
+                                'url': beta_item['url'],
+                                'sha256': beta_item['hash'],
+                                'date': datetime.now().strftime('%y%m%d')
+                            }
+                            beta_entries.append(beta_info)
+
+                # Check if we have valid beta data for Factory
+                if factory_beta_data and isinstance(factory_beta_data, BetaData) and hasattr(factory_beta_data, 'devices'):
+                    for beta_item in factory_beta_data.devices:
+                        if device_label == beta_item['device']:
+                            if beta_item['error']:
+                                the_version = f"⚠️ Factory - {beta_item['category']} ({factory_build_id}) - Problem with wrong build or hash"
+                            else:
+                                the_version = f"Factory - {beta_item['category']} ({factory_build_id})"
+                            beta_info = {
+                                'version': f"Factory - {beta_item['category']} ({factory_build_id})",
+                                'url': beta_item['url'],
+                                'sha256': beta_item['hash'],
+                                'date': datetime.now().strftime('%y%m%d')
+                            }
+                            beta_entries.append(beta_info)
+
+                # Only add beta list if there are actual beta entries
+                if beta_entries:
+                    data[device_id]['beta'] = beta_entries
+
+        # Convert to JSON
+        json_data = json.dumps(data, indent=2)
+
+        # Save
+        with open(save_to, 'w', encoding='utf-8') as json_file:
+            json_file.write(json_data)
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error in get_google_images function")
+        traceback.print_exc()
 
 
 # ============================================================================
 #                         extract_date_from_google_version
 # ============================================================================
 def extract_date_from_google_version(version_string):
-    # pattern to find a 3-letter month followed by a year
-    pattern = re.compile(r'(\b[A-Za-z]{3}\s\d{4}\b)')
-    match = pattern.search(version_string)
+    try:
+        # pattern to find a 3-letter month followed by a year
+        pattern = re.compile(r'(\b[A-Za-z]{3}\s\d{4}\b)')
+        match = pattern.search(version_string)
 
-    if match:
-        date_str = match.group()
-        date_obj = datetime.strptime(date_str, '%b %Y')
-        # convert to yymm01
-        return date_obj.strftime('%y%m01')
-    return None
+        if match:
+            date_str = match.group()
+            date_obj = datetime.strptime(date_str, '%b %Y')
+            # convert to yymm01
+            return date_obj.strftime('%y%m01')
+        return None
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error in extract_date_from_google_version function")
+        traceback.print_exc()
 
 
 # ============================================================================
@@ -2286,23 +3615,46 @@ def download_file(url, filename=None, callback=None, stream=True):
 #                               Function get_first_match
 # ============================================================================
 def get_first_match(dictionary, keys):
-    for key in keys:
-        if key in dictionary:
-            value = dictionary[key]
-            break
-    else:
-        value = ''
-    return value
+    try:
+        for key in keys:
+            if key in dictionary:
+                value = dictionary[key]
+                break
+        else:
+            value = ''
+        return value
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error in get_first_match function")
+        traceback.print_exc()
 
 
 # ============================================================================
 #                               Function delete_keys_from_dict
 # ============================================================================
 def delete_keys_from_dict(dictionary, keys):
-    for key in keys:
-        if key in dictionary:
-            del dictionary[key]
-    return dictionary
+    try:
+        for key in keys:
+            if key in dictionary:
+                del dictionary[key]
+        return dictionary
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error in delete_keys_from_dict function")
+        traceback.print_exc()
+
+
+# ============================================================================
+#                               Function is_valid_json
+# ============================================================================
+def is_valid_json(json_str):
+    try:
+        json.loads(json_str)
+        return True
+    except Exception:
+        try:
+            json5.loads(json_str)
+            return True
+        except Exception:
+            return False
 
 
 # ============================================================================
@@ -2311,11 +3663,14 @@ def delete_keys_from_dict(dictionary, keys):
 def process_dict(the_dict, add_missing_keys=False, pif_flavor='', set_first_api=None, sort_data=False, keep_all=False):
     try:
         module_versionCode = 0
+        module_flavor = None
+        config = get_config()
         with contextlib.suppress(Exception):
             module_flavor = pif_flavor.split('_')[0]
             module_versionCode = int(pif_flavor.split('_')[1])
         if module_flavor is None or module_flavor == '':
-            module_flavor = 'playintegrityfork'
+            print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Unable to determine module flavor.")
+            return ''
         if module_versionCode == 0:
             module_versionCode = 9999999
         android_devices = get_android_devices()
@@ -2326,7 +3681,7 @@ def process_dict(the_dict, add_missing_keys=False, pif_flavor='', set_first_api=
                 device_dict = device.props.property
                 autofill = True
             else:
-                print("ERROR: Device is unavilable to add missing fields from device.")
+                print("ERROR: Device is unavailable to add missing fields from device.")
 
         # FINGERPRINT
         fp_ro_product_brand = ''
@@ -2401,12 +3756,23 @@ def process_dict(the_dict, add_missing_keys=False, pif_flavor='', set_first_api=
         # MODEL
         keys = ['ro.product.model', 'ro.product.system.model', 'ro.product.product.model', 'ro.product.vendor.model', 'ro.vendor.product.model']
         ro_product_model = get_first_match(the_dict, keys)
+        if ro_product_model in ['mainline', 'generic']:
+            ro_product_model_bak = ro_product_model
+            # get it from vendor/build.prop (ro.product.vendor.model)
+            ro_product_vendor_model = get_first_match(the_dict, ['ro.product.vendor.model'])
+            if ro_product_vendor_model and ro_product_vendor_model != '':
+                ro_product_model = ro_product_vendor_model
+            else:
+                # If it is a Google device
+                if ro_product_manufacturer == 'Google':
+                # get model from android_devices if it is a Google device
+                    try:
+                        ro_product_model = android_devices[ro_product_device]['device']
+                    except KeyError:
+                        ro_product_model = ro_product_model_bak
+                        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Key '{ro_product_device}' not found in android_devices.\nMODEL field could be wrong")
         if ro_product_model != '':
             the_dict = delete_keys_from_dict(the_dict, keys)
-        if ro_product_model in ['mainline', 'generic'] and ro_product_manufacturer == 'Google':
-            # get model from android_devices if it is a Google device
-            # TODO: otherwise, or ideally from vendor/build.prop
-            ro_product_model = android_devices[ro_product_device]['device']
         if autofill and ro_product_model == '':
             ro_product_model = get_first_match(device_dict, keys)
 
@@ -2509,33 +3875,50 @@ def process_dict(the_dict, add_missing_keys=False, pif_flavor='', set_first_api=
 
         # Global Common
         donor_data = {
-            "PRODUCT": ro_product_name,
-            "DEVICE": ro_product_device,
             "MANUFACTURER": ro_product_manufacturer,
-            "BRAND": ro_product_brand,
             "MODEL": ro_product_model,
             "FINGERPRINT": ro_build_fingerprint,
-            "SECURITY_PATCH": ro_build_version_security_patch
+            "BRAND": ro_product_brand,
+            "PRODUCT": ro_product_name,
+            "DEVICE": ro_product_device,
+            "RELEASE": ro_build_version_release,
+            "ID": ro_build_id,
+            "INCREMENTAL": ro_build_version_incremental,
+            "TYPE": ro_build_type,
+            "TAGS": ro_build_tags,
+            "SECURITY_PATCH": ro_build_version_security_patch,
+            # "BOARD": ro_product_board,
+            # "HARDWARE": ro_product_hardware,
+            "DEVICE_INITIAL_SDK_INT": ro_product_first_api_level
         }
 
         # Play Integrity Fork
         if module_flavor == 'playintegrityfork':
             # Common in Play Integrity Fork (v4 and newer)
-            donor_data["INCREMENTAL"] = ro_build_version_incremental
-            donor_data["TYPE"] = ro_build_type
-            donor_data["TAGS"] = ro_build_tags
-            donor_data["RELEASE"] = ro_build_version_release
-            donor_data["DEVICE_INITIAL_SDK_INT"] = ro_product_first_api_level
-            donor_data["ID"] = ro_build_id
+            # donor_data["INCREMENTAL"] = ro_build_version_incremental
+            # donor_data["TYPE"] = ro_build_type
+            # donor_data["TAGS"] = ro_build_tags
+            # donor_data["RELEASE"] = ro_build_version_release
+            # donor_data["DEVICE_INITIAL_SDK_INT"] = ro_product_first_api_level
+            # donor_data["ID"] = ro_build_id
 
             # v5 or newer
-            if module_versionCode >= 5000:
+            if module_versionCode >= 5000 and module_flavor != 'trickystore':
                 donor_data["*api_level"] = ro_product_first_api_level
                 donor_data["*.security_patch"] = ro_build_version_security_patch
                 donor_data["*.build.id"] = ro_build_id
                 if module_versionCode <= 7000:
                     donor_data["VERBOSE_LOGS"] = "0"
-            if module_versionCode > 7000:
+            if module_versionCode > 9000 and module_flavor != 'trickystore':
+                spoofBuild_value = config.pif.get('spoofBuild', True)
+                donor_data["spoofBuild"] = "1" if spoofBuild_value else "0"
+                spoofProps_value = config.pif.get('spoofProps', False)
+                donor_data["spoofProps"] = "1" if spoofProps_value else "0"
+                spoofProvider_value = config.pif.get('spoofProvider', False)
+                donor_data["spoofProvider"] = "1" if spoofProvider_value else "0"
+                spoofSignature_value = config.pif.get('spoofSignature', False)
+                donor_data["spoofSignature"] = "1" if spoofSignature_value else "0"
+            if module_versionCode > 7000 and module_flavor != 'trickystore':
                 donor_data["verboseLogs"] = "0"
             # donor_data["*.vndk_version"] = ro_vndk_version
 
@@ -2543,15 +3926,16 @@ def process_dict(the_dict, add_missing_keys=False, pif_flavor='', set_first_api=
             modified_donor_data = {key: value for key, value in donor_data.items() if value != ""}
 
         # Chit's module and other forks
-        else:
+        elif module_flavor == 'playintegrityfix':
             donor_data["FIRST_API_LEVEL"] = ro_product_first_api_level
             donor_data["BUILD_ID"] = ro_build_id
-            donor_data["ID"] = ro_build_id
             donor_data["VNDK_VERSION"] = ro_vndk_version
             donor_data["FORCE_BASIC_ATTESTATION"] = "true"
             # donor_data["KERNEL"] = "Goolag-perf"
 
             # No discard keys with empty values on chit's module
+            modified_donor_data = donor_data
+        else:
             modified_donor_data = donor_data
 
         # Keep unknown props if the flag is set
@@ -2559,6 +3943,13 @@ def process_dict(the_dict, add_missing_keys=False, pif_flavor='', set_first_api=
             for key, value in the_dict.items():
                 if key not in modified_donor_data:
                     modified_donor_data[key] = value
+
+        if not keep_all:
+            filtered_data = {}
+            for key, value in modified_donor_data.items():
+                if value:
+                    filtered_data[key] = value
+            modified_donor_data = filtered_data
 
         if not sort_data:
             return json.dumps(modified_donor_data, indent=4)
@@ -2574,90 +3965,161 @@ def process_dict(the_dict, add_missing_keys=False, pif_flavor='', set_first_api=
 #                               Function detect_encoding
 # ============================================================================
 def detect_encoding(filename):
-    with open(filename, 'rb') as file:
-        result = chardet.detect(file.read())
-    return result['encoding']
+    try:
+        with open(filename, 'rb') as file:
+            result = chardet.detect(file.read())
+        return result['encoding']
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error in detect_encoding function")
+        traceback.print_exc()
 
 
 # ============================================================================
 #                               Function process_pi_xml_piac
 # ============================================================================
 def process_pi_xml_piac(filename):
-    encoding = detect_encoding(filename)
-    with open(filename, 'r', encoding=encoding, errors="replace") as file:
-        xml_string = file.read()
+    try:
+        encoding = detect_encoding(filename)
+        with open(filename, 'r', encoding=encoding, errors="replace") as file:
+            xml_string = file.read()
 
-    # Parse the XML string
-    root = ET.fromstring(xml_string)
+        # Parse the XML string
+        root = ET.fromstring(xml_string)
 
-    # Specify the resource-ids to identify the nodes of interest
-    resource_ids_list = [
-        'gr.nikolasspyr.integritycheck:id/device_integrity_icon',
-        'gr.nikolasspyr.integritycheck:id/basic_integrity_icon',
-        'gr.nikolasspyr.integritycheck:id/strong_integrity_icon'
-    ]
+        # Specify the resource-ids to identify the nodes of interest
+        resource_ids_list = [
+            'gr.nikolasspyr.integritycheck:id/device_integrity_icon',
+            'gr.nikolasspyr.integritycheck:id/basic_integrity_icon',
+            'gr.nikolasspyr.integritycheck:id/strong_integrity_icon'
+        ]
 
-    # Check if the XML contains the specific string
-    if 'The calling app is making too many requests to the API' in xml_string:
-        return "Quota Reached.\nPlay Integrity API Checker\nis making too many requests to the Google API."
+        # Check if the XML contains the specific string
+        if 'The calling app is making too many requests to the API' in xml_string:
+            return "Quota Reached.\nPlay Integrity API Checker\nis making too many requests to the Google API."
 
-    # Print the 'content-desc' values along with a modified version of the resource-id
-    result = ''
-    for resource_id in resource_ids_list:
-        nodes = root.findall(f'.//node[@resource-id="{resource_id}"]')
-        for node in nodes:
-            value = node.get('content-desc', '')
-            modified_resource_id = resource_id.replace('gr.nikolasspyr.integritycheck:id/', '').replace('_icon', '')
-            result += f"{modified_resource_id}:\t{value}\n"
-    if result == '':
+        # Print the 'content-desc' values along with a modified version of the resource-id
+        result = ''
+        for resource_id in resource_ids_list:
+            nodes = root.findall(f'.//node[@resource-id="{resource_id}"]')
+            for node in nodes:
+                value = node.get('content-desc', '')
+                modified_resource_id = resource_id.replace('gr.nikolasspyr.integritycheck:id/', '').replace('_icon', '')
+                result += f"{modified_resource_id}:\t{value}\n"
+        if result == '':
+            return -1
+        debug(result)
+        return result
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error in process_pi_xml_piac function")
+        traceback.print_exc()
         return -1
-    debug(result)
-    return result
 
 
 # ============================================================================
 #                               Function process_pi_xml_spic
 # ============================================================================
 def process_pi_xml_spic(filename):
-    encoding = detect_encoding(filename)
-    with open(filename, 'r', encoding=encoding, errors="replace") as file:
-        xml_content = file.read()
+    try:
+        encoding = detect_encoding(filename)
+        with open(filename, 'r', encoding=encoding, errors="replace") as file:
+            xml_content = file.read()
 
-    # Check if the XML contains the specific string
-    if 'Integrity API error (-8)' in xml_content:
-        return "Quota Reached.\nSimple Play Integrity Checker\nis making too many requests to the Google API."
+        # Check if the XML contains the specific string
+        if 'Integrity API error (-8)' in xml_content:
+            return "Quota Reached.\nSimple Play Integrity Checker\nis making too many requests to the Google API."
 
-    # Find the position of "Play Integrity Result:"
-    play_integrity_result_pos = xml_content.find("Play Integrity Result:")
+        # Find the position of "Play Integrity Result:"
+        play_integrity_result_pos = xml_content.find("Play Integrity Result:")
 
-    # If "Play Integrity Result:" is found, continue searching for index="3"
-    if play_integrity_result_pos != -1:
-        index_3_pos = xml_content.find('index="3"', play_integrity_result_pos)
+        # If "Play Integrity Result:" is found, continue searching for index="3"
+        if play_integrity_result_pos != -1:
+            index_3_pos = xml_content.find('index="3"', play_integrity_result_pos)
 
-        # If index="3" is found, extract the value after it
-        if index_3_pos != -1:
-            # Adjust the position to point at the end of 'index="3"' and then get the next value between double quotes.
-            index_3_pos += len('index="3"')
-            value_start_pos = xml_content.find('"', index_3_pos) + 1
-            value_end_pos = xml_content.find('"', value_start_pos)
-            value_after_index_3 = xml_content[value_start_pos:value_end_pos]
-            debug(value_after_index_3)
-            if value_after_index_3 == "NO_INTEGRITY":
-                result = "[✗] [✗] [✗]"
-            elif value_after_index_3 == "MEETS_BASIC_INTEGRITY":
-                result = "[✓] [✗] [✗]"
-            elif value_after_index_3 == "MEETS_DEVICE_INTEGRITY":
-                result = "[✓] [✓] [✗]"
-            elif value_after_index_3 == "MEETS_STRONG_INTEGRITY":
-                result = "[✓] [✓] [✓]"
-            elif value_after_index_3 == "MEETS_VIRTUAL_INTEGRITY":
-                result = "[o] [o] [o]"
-            return f"{result} {value_after_index_3}"
+            # If index="3" is found, extract the value after it
+            if index_3_pos != -1:
+                # Adjust the position to point at the end of 'index="3"' and then get the next value between double quotes.
+                index_3_pos += len('index="3"')
+                value_start_pos = xml_content.find('"', index_3_pos) + 1
+                value_end_pos = xml_content.find('"', value_start_pos)
+                value_after_index_3 = xml_content[value_start_pos:value_end_pos]
+                debug(value_after_index_3)
+                if value_after_index_3 == "NO_INTEGRITY":
+                    result = "[✗] [✗] [✗]"
+                elif value_after_index_3 == "MEETS_BASIC_INTEGRITY":
+                    result = "[✓] [✗] [✗]"
+                elif value_after_index_3 == "MEETS_DEVICE_INTEGRITY":
+                    result = "[✓] [✓] [✗]"
+                elif value_after_index_3 == "MEETS_STRONG_INTEGRITY":
+                    result = "[✓] [✓] [✓]"
+                elif value_after_index_3 == "MEETS_VIRTUAL_INTEGRITY":
+                    result = "[o] [o] [o]"
+                return f"{result} {value_after_index_3}"
+            else:
+                print("Error")
+                return -1
         else:
-            print("Error")
+            print("'Play Integrity Result:' not found")
             return -1
-    else:
-        print("'Play Integrity Result:' not found")
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error in process_pi_xml_spic function")
+        traceback.print_exc()
+        return -1
+
+
+# ============================================================================
+#                               Function process_pi_xml_aic
+# ============================================================================
+def process_pi_xml_aic(filename):
+    try:
+        encoding = detect_encoding(filename)
+        with open(filename, 'r', encoding=encoding, errors="replace") as file:
+            xml_content = file.read()
+
+        # Check if the XML contains the specific string
+        if 'Integrity API error' in xml_content:
+            return "Quota Reached.\nAndroid Integrity Checker\nis making too many requests to the Google API."
+
+        # Find the position of "Play Integrity Result:"
+        device_recognition_verdict_pos = xml_content.find("Device recognition verdict")
+
+        # If "Device recognition verdict" is found, continue searching for index="3"
+        if device_recognition_verdict_pos != -1:
+            index_6_pos = xml_content.find('index="6"', device_recognition_verdict_pos)
+
+            # If index="6" is found, extract the value after it
+            if index_6_pos != -1:
+                # Adjust the position to point at the end of 'index="3"' and then get the next value between double quotes.
+                index_6_pos += len('index="6"')
+                value_start_pos = xml_content.find('"', index_6_pos) + 1
+                value_end_pos = xml_content.find('"', value_start_pos)
+                value_after_index_6 = xml_content[value_start_pos:value_end_pos]
+                debug(value_after_index_6)
+                result = ''
+                if 'MEETS_BASIC_INTEGRITY' in value_after_index_6:
+                    result += '[✓]'
+                else:
+                    result += '[✗]'
+
+                if 'MEETS_DEVICE_INTEGRITY' in value_after_index_6:
+                    result += ' [✓]'
+                else:
+                    result += ' [✗]'
+
+                if 'MEETS_STRONG_INTEGRITY' in value_after_index_6:
+                    result += ' [✓]'
+                else:
+                    result += ' [✗]'
+
+                return f"{result}\n{value_after_index_6}"
+            else:
+                print("Error")
+                return -1
+        else:
+            print("'Play Integrity Result:' not found")
+            return -1
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error in process_pi_xml_spic function")
+        traceback.print_exc()
         return -1
 
 
@@ -2665,67 +4127,72 @@ def process_pi_xml_spic(filename):
 #                               Function process_pi_xml_tb
 # ============================================================================
 def process_pi_xml_tb(filename):
-    encoding = detect_encoding(filename)
-    with open(filename, 'r', encoding=encoding, errors="replace") as file:
-        xml_content = file.read()
+    try:
+        encoding = detect_encoding(filename)
+        with open(filename, 'r', encoding=encoding, errors="replace") as file:
+            xml_content = file.read()
 
-    # Find the position of "Play Integrity Result:"
-    play_integrity_result_pos = xml_content.find("Result Play integrity")
+        # Find the position of "Play Integrity Result:"
+        play_integrity_result_pos = xml_content.find("Result Play integrity")
 
-    # If "Result Play integrity" is found, continue searching for index="3"
-    if play_integrity_result_pos != -1:
-        basic_integrity_pos = xml_content.find('"Basic integrity"', play_integrity_result_pos)
+        # If "Result Play integrity" is found, continue searching for index="3"
+        if play_integrity_result_pos != -1:
+            basic_integrity_pos = xml_content.find('"Basic integrity"', play_integrity_result_pos)
 
-        # If "Basic integrity" is found, continue looking for text=
-        if basic_integrity_pos != -1:
-            # find next text= position
-            basic_integrity_result_pos = xml_content.find('text=', basic_integrity_pos)
-
-            # Adjust the position to point at the end of 'text=' and then get the next value between double quotes.
-            basic_integrity_result_pos += len('text=')
-
-            value_start_pos = xml_content.find('"', basic_integrity_result_pos) + 1
-            value_end_pos = xml_content.find('"', value_start_pos)
-            basic_integrity = xml_content[value_start_pos:value_end_pos]
-
-            device_integrity_pos = xml_content.find('"Device integrity"', value_end_pos)
-            # If "Device integrity" is found, continue looking for text=
-            if device_integrity_pos != -1:
+            # If "Basic integrity" is found, continue looking for text=
+            if basic_integrity_pos != -1:
                 # find next text= position
-                device_integrity_result_pos = xml_content.find('text=', device_integrity_pos)
+                basic_integrity_result_pos = xml_content.find('text=', basic_integrity_pos)
 
                 # Adjust the position to point at the end of 'text=' and then get the next value between double quotes.
-                device_integrity_result_pos += len('text=')
+                basic_integrity_result_pos += len('text=')
 
-                value_start_pos = xml_content.find('"', device_integrity_result_pos) + 1
+                value_start_pos = xml_content.find('"', basic_integrity_result_pos) + 1
                 value_end_pos = xml_content.find('"', value_start_pos)
-                device_integrity = xml_content[value_start_pos:value_end_pos]
+                basic_integrity = xml_content[value_start_pos:value_end_pos]
 
-
-                strong_integrity_pos = xml_content.find('"Strong integrity"', value_end_pos)
+                device_integrity_pos = xml_content.find('"Device integrity"', value_end_pos)
                 # If "Device integrity" is found, continue looking for text=
-                if strong_integrity_pos != -1:
+                if device_integrity_pos != -1:
                     # find next text= position
-                    strong_integrity_result_pos = xml_content.find('text=', strong_integrity_pos)
+                    device_integrity_result_pos = xml_content.find('text=', device_integrity_pos)
 
                     # Adjust the position to point at the end of 'text=' and then get the next value between double quotes.
-                    strong_integrity_result_pos += len('text=')
+                    device_integrity_result_pos += len('text=')
 
-                    value_start_pos = xml_content.find('"', strong_integrity_result_pos) + 1
+                    value_start_pos = xml_content.find('"', device_integrity_result_pos) + 1
                     value_end_pos = xml_content.find('"', value_start_pos)
-                    strong_integrity = xml_content[value_start_pos:value_end_pos]
+                    device_integrity = xml_content[value_start_pos:value_end_pos]
 
-                result = f"Basic integrity:  {basic_integrity}\n"
-                result += f"Device integrity: {device_integrity}\n"
-                result += f"Strong integrity: {strong_integrity}\n"
 
-                debug(result)
-                return result
+                    strong_integrity_pos = xml_content.find('"Strong integrity"', value_end_pos)
+                    # If "Device integrity" is found, continue looking for text=
+                    if strong_integrity_pos != -1:
+                        # find next text= position
+                        strong_integrity_result_pos = xml_content.find('text=', strong_integrity_pos)
+
+                        # Adjust the position to point at the end of 'text=' and then get the next value between double quotes.
+                        strong_integrity_result_pos += len('text=')
+
+                        value_start_pos = xml_content.find('"', strong_integrity_result_pos) + 1
+                        value_end_pos = xml_content.find('"', value_start_pos)
+                        strong_integrity = xml_content[value_start_pos:value_end_pos]
+
+                    result = f"Basic integrity:  {basic_integrity}\n"
+                    result += f"Device integrity: {device_integrity}\n"
+                    result += f"Strong integrity: {strong_integrity}\n"
+
+                    debug(result)
+                    return result
+            else:
+                print("Error")
+                return -1
         else:
-            print("Error")
+            print("'Result Play integrity' not found")
             return -1
-    else:
-        print("'Result Play integrity' not found")
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error in process_pi_xml_tb function")
+        traceback.print_exc()
         return -1
 
 
@@ -2733,92 +4200,103 @@ def process_pi_xml_tb(filename):
 #                               Function process_pi_xml_ps
 # ============================================================================
 def process_pi_xml_ps(filename):
-    encoding = detect_encoding(filename)
-    with open(filename, 'r', encoding=encoding, errors="replace") as file:
-        xml_content = file.read()
+    try:
+        encoding = detect_encoding(filename)
+        with open(filename, 'r', encoding=encoding, errors="replace") as file:
+            xml_content = file.read()
 
-    # Find the position of text="Labels:
-    labels_pos = xml_content.find('text="Labels:')
+        # Find the position of text="Labels:
+        labels_pos = xml_content.find('text="Labels:')
 
-    # If found
-    if labels_pos != -1:
+        # If found
+        if labels_pos != -1:
 
-        # Adjust the position to point at the end of 'text=' and then get the next value between [ ].
-        labels_pos += len('text="Labels:')
+            # Adjust the position to point at the end of 'text=' and then get the next value between [ ].
+            labels_pos += len('text="Labels:')
 
-        value_start_pos = xml_content.find('[', labels_pos) + 1
-        value_end_pos = xml_content.find(']', value_start_pos)
-        result = xml_content[value_start_pos:value_end_pos]
-        debug(result)
-        return result
+            value_start_pos = xml_content.find('[', labels_pos) + 1
+            value_end_pos = xml_content.find(']', value_start_pos)
+            result = xml_content[value_start_pos:value_end_pos]
+            debug(result)
+            return result
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error in process_pi_xml_ps function")
+        traceback.print_exc()
+        return -1
 
 
 # ============================================================================
 #                               Function process_pi_xml_yasnac
 # ============================================================================
 def process_pi_xml_yasnac(filename):
-    encoding = detect_encoding(filename)
-    with open(filename, 'r', encoding=encoding, errors="replace") as file:
-        xml_content = file.read()
+    try:
+        encoding = detect_encoding(filename)
+        with open(filename, 'r', encoding=encoding, errors="replace") as file:
+            xml_content = file.read()
 
-    # Find the position of text="Result"
-    yasnac_result_pos = xml_content.find('text="Result"')
+        # Find the position of text="Result"
+        yasnac_result_pos = xml_content.find('text="Result"')
 
-    # If found, continue searching for text="Basic integrity"
-    if yasnac_result_pos != -1:
-        basic_integrity_pos = xml_content.find('"Basic integrity"', yasnac_result_pos)
+        # If found, continue searching for text="Basic integrity"
+        if yasnac_result_pos != -1:
+            basic_integrity_pos = xml_content.find('"Basic integrity"', yasnac_result_pos)
 
-        # If "Basic integrity" is found, continue looking for text=
-        if basic_integrity_pos != -1:
-            # find next text= position
-            basic_integrity_result_pos = xml_content.find('text=', basic_integrity_pos)
-
-            # Adjust the position to point at the end of 'text=' and then get the next value between double quotes.
-            basic_integrity_result_pos += len('text=')
-
-            value_start_pos = xml_content.find('"', basic_integrity_result_pos) + 1
-            value_end_pos = xml_content.find('"', value_start_pos)
-            basic_integrity = xml_content[value_start_pos:value_end_pos]
-
-            cts_profile_match_pos = xml_content.find('"CTS profile match"', value_end_pos)
-            # If "CTS profile match" is found, continue looking for text=
-            if cts_profile_match_pos != -1:
+            # If "Basic integrity" is found, continue looking for text=
+            if basic_integrity_pos != -1:
                 # find next text= position
-                cts_profile_match_result_pos = xml_content.find('text=', cts_profile_match_pos)
+                basic_integrity_result_pos = xml_content.find('text=', basic_integrity_pos)
 
                 # Adjust the position to point at the end of 'text=' and then get the next value between double quotes.
-                cts_profile_match_result_pos += len('text=')
+                basic_integrity_result_pos += len('text=')
 
-                value_start_pos = xml_content.find('"', cts_profile_match_result_pos) + 1
+                value_start_pos = xml_content.find('"', basic_integrity_result_pos) + 1
                 value_end_pos = xml_content.find('"', value_start_pos)
-                cts_profile_match = xml_content[value_start_pos:value_end_pos]
+                basic_integrity = xml_content[value_start_pos:value_end_pos]
 
-
-                evaluation_type_pos = xml_content.find('"Evaluation type"', value_end_pos)
-                # If "Evaluation type" is found, continue looking for text=
-                if evaluation_type_pos != -1:
+                cts_profile_match_pos = xml_content.find('"CTS profile match"', value_end_pos)
+                # If "CTS profile match" is found, continue looking for text=
+                if cts_profile_match_pos != -1:
                     # find next text= position
-                    evaluation_type_result_pos = xml_content.find('text=', evaluation_type_pos)
+                    cts_profile_match_result_pos = xml_content.find('text=', cts_profile_match_pos)
 
                     # Adjust the position to point at the end of 'text=' and then get the next value between double quotes.
-                    evaluation_type_result_pos += len('text=')
+                    cts_profile_match_result_pos += len('text=')
 
-                    value_start_pos = xml_content.find('"', evaluation_type_result_pos) + 1
+                    value_start_pos = xml_content.find('"', cts_profile_match_result_pos) + 1
                     value_end_pos = xml_content.find('"', value_start_pos)
-                    evaluation_type = xml_content[value_start_pos:value_end_pos]
+                    cts_profile_match = xml_content[value_start_pos:value_end_pos]
 
-                result = f"Basic integrity:   {basic_integrity}\n"
-                result += f"CTS profile match: {cts_profile_match}\n"
-                result += f"Evaluation type:   {evaluation_type}\n"
 
-                debug(result)
-                return result
+                    evaluation_type_pos = xml_content.find('"Evaluation type"', value_end_pos)
+                    # If "Evaluation type" is found, continue looking for text=
+                    if evaluation_type_pos != -1:
+                        # find next text= position
+                        evaluation_type_result_pos = xml_content.find('text=', evaluation_type_pos)
+
+                        # Adjust the position to point at the end of 'text=' and then get the next value between double quotes.
+                        evaluation_type_result_pos += len('text=')
+
+                        value_start_pos = xml_content.find('"', evaluation_type_result_pos) + 1
+                        value_end_pos = xml_content.find('"', value_start_pos)
+                        evaluation_type = xml_content[value_start_pos:value_end_pos]
+
+                    result = f"Basic integrity:   {basic_integrity}\n"
+                    result += f"CTS profile match: {cts_profile_match}\n"
+                    result += f"Evaluation type:   {evaluation_type}\n"
+
+                    debug(result)
+                    return result
+            else:
+                print("Error")
+                return -1
         else:
-            print("Error")
+            print("'Result' not found")
             return -1
-    else:
-        print("'Result' not found")
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error in process_pi_xml_yasnac function")
+        traceback.print_exc()
         return -1
+
 
 # ============================================================================
 #                               Function get_xiaomi_apk
@@ -3050,17 +4528,131 @@ def get_freeman_pif(abi_list=None):
 #                               Function get_pif_from_image
 # ============================================================================
 def get_pif_from_image(image_file):
-    try:
-        config_path = get_config_path()
-        path_to_7z = get_path_to_7z()
-        temp_dir = tempfile.TemporaryDirectory()
-        temp_dir_path = temp_dir.name
+    config_path = get_config_path()
+    config = get_config()
+    path_to_7z = get_path_to_7z()
+    temp_dir = tempfile.TemporaryDirectory()
+    temp_dir_path = temp_dir.name
+    # create props folder
+    props_folder = os.path.join(config_path, "props")
+    package_sig = os.path.splitext(os.path.basename(image_file))[0]
+    props_path = os.path.join(props_folder, package_sig)
+    if os.path.exists(props_path):
+        shutil.rmtree(props_path)
+    os.makedirs(props_path, exist_ok=True)
 
-        file_to_process = image_file
+    file_to_process = image_file
+    basename = ntpath.basename(image_file)
+    filename, extension = os.path.splitext(basename)
+    extension = extension.lower()
+
+    # ==================================================
+    # Sub Function  process_system_vendor_product_images
+    # ==================================================
+    def process_system_vendor_product_images():
+        # process system.img
+        try:
+            img_archive = os.path.join(temp_dir_path, "system.img")
+            if os.path.exists(img_archive):
+                found_system_build_prop = check_archive_contains_file(archive_file_path=img_archive, file_to_check="build.prop", nested=False, is_recursive=False)
+                if found_system_build_prop:
+                    print(f"Extracting build.prop from {img_archive} ...")
+                    theCmd = f"\"{path_to_7z}\" x -bd -y -o\"{props_path}\" \"{img_archive}\" {found_system_build_prop}"
+                    debug(theCmd)
+                    res = run_shell2(theCmd)
+                    if os.path.exists(os.path.join(props_path, found_system_build_prop)):
+                        os.rename(os.path.join(props_path, found_system_build_prop), os.path.join(props_path, "system-build.prop"))
+                else:
+                    print(f"build.prop not found in {img_archive}")
+        except Exception as e:
+            print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error while processing system.img:")
+            traceback.print_exc()
+
+        # process vendor.img
+        try:
+            img_archive = os.path.join(temp_dir_path, "vendor.img")
+            if os.path.exists(img_archive):
+                found_vendor_img_prop = check_archive_contains_file(archive_file_path=img_archive, file_to_check="build.prop", nested=False, is_recursive=False)
+                if found_vendor_img_prop:
+                    print(f"Extracting build.prop from {img_archive} ...")
+                    theCmd = f"\"{path_to_7z}\" x -bd -y -o\"{props_path}\" \"{img_archive}\" {found_vendor_img_prop}"
+                    debug(theCmd)
+                    res = run_shell2(theCmd)
+                    if os.path.exists(os.path.join(props_path, found_vendor_img_prop)):
+                        os.rename(os.path.join(props_path, found_vendor_img_prop), os.path.join(props_path, "vendor-build.prop"))
+                else:
+                    print(f"build.prop not found in {img_archive}")
+        except Exception as e:
+            print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error while processing vendor.img:")
+            traceback.print_exc()
+
+        # process product.img
+        try:
+            img_archive = os.path.join(temp_dir_path, "product.img")
+            if os.path.exists(img_archive):
+                found_product_img_prop = check_archive_contains_file(archive_file_path=img_archive, file_to_check="build.prop", nested=False, is_recursive=False)
+                if found_product_img_prop:
+                    print(f"Extracting build.prop from {img_archive} ...")
+                    theCmd = f"\"{path_to_7z}\" x -bd -y -o\"{props_path}\" \"{img_archive}\" {found_product_img_prop}"
+                    debug(theCmd)
+                    res = run_shell2(theCmd)
+                    if os.path.exists(os.path.join(props_path, found_product_img_prop)):
+                        os.rename(os.path.join(props_path, found_product_img_prop), os.path.join(props_path, "product-build.prop"))
+                else:
+                    print(f"build.prop not found in {img_archive}")
+        except Exception as e:
+            print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error while processing product.img:")
+            traceback.print_exc()
+
+    # ==================================================
+    # Sub Function  check_for_system_vendor_product_imgs
+    # ==================================================
+    def check_for_system_vendor_product_imgs(filename):
+        # check if image file is included and contains what we need
+        if os.path.exists(filename):
+            # extract system.img
+            found_system_img = check_archive_contains_file(archive_file_path=filename, file_to_check="system.img", nested=False, is_recursive=False)
+            if found_system_img:
+                print(f"Extracting system.img from {filename} ...")
+                theCmd = f"\"{path_to_7z}\" x -bd -y -o\"{temp_dir_path}\" \"{filename}\" system.img"
+                debug(theCmd)
+                res = run_shell2(theCmd)
+
+            # extract vendor.img
+            found_vendor_img = check_archive_contains_file(archive_file_path=filename, file_to_check="vendor.img", nested=False, is_recursive=False)
+            if found_vendor_img:
+                print(f"Extracting system.img from {filename} ...")
+                theCmd = f"\"{path_to_7z}\" x -bd -y -o\"{temp_dir_path}\" \"{filename}\" vendor.img"
+                debug(theCmd)
+                res = run_shell2(theCmd)
+
+            # extract product.img
+            found_product_img = check_archive_contains_file(archive_file_path=filename, file_to_check="product.img", nested=False, is_recursive=False)
+            if found_product_img:
+                print(f"Extracting system.img from {filename} ...")
+                theCmd = f"\"{path_to_7z}\" x -bd -y -o\"{temp_dir_path}\" \"{filename}\" product.img"
+                debug(theCmd)
+                res = run_shell2(theCmd)
+
+    try:
+        # .img file
+        if extension == ".img":
+            if filename in ["system", "vendor", "product"]:
+                # copy the image file to the temp directory
+                shutil.copy2(file_to_process, temp_dir_path)
+            else:
+                shutil.copy2(file_to_process, os.path.join(temp_dir_path, "system.img"))
+            process_system_vendor_product_images()
+            return props_path
+
         found_flash_all_bat = check_archive_contains_file(archive_file_path=file_to_process, file_to_check="flash-all.bat", nested=False)
-        found_flash_all_sh = check_archive_contains_file(archive_file_path=file_to_process, file_to_check="flash-all.sh", nested=False)
+        if found_flash_all_bat:
+            found_flash_all_sh = check_archive_contains_file(archive_file_path=file_to_process, file_to_check="flash-all.sh", nested=False)
+
         if found_flash_all_bat and found_flash_all_sh:
-            # assume Pixel factory file
+            # -----------------------------
+            # Pixel factory file
+            # -----------------------------
             package_sig = found_flash_all_bat.split('/')[0]
             if not package_sig:
                 print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Could not extract package signature from {found_flash_all_bat}")
@@ -3072,81 +4664,228 @@ def get_pif_from_image(image_file):
             theCmd = f"\"{path_to_7z}\" x -bd -y -o\"{temp_dir_path}\" \"{file_to_process}\""
             debug(theCmd)
             res = run_shell2(theCmd)
-            if res.returncode != 0:
+            if res and isinstance(res, subprocess.CompletedProcess):
+                debug(f"Return Code: {res.returncode}")
+                debug(f"Stdout: {res.stdout}")
+                debug(f"Stderr: {res.stderr}")
+                if res.returncode != 0:
+                    print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Could not extract {file_to_process}")
+                    print("Aborting ...\n")
+                    return
+            else:
                 print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Could not extract {file_to_process}")
+                print("Aborting ...\n")
+                return
+
+            # check if image file is included and contains what we need
+            if os.path.exists(image_file_path):
+                check_for_system_vendor_product_imgs(image_file_path)
+                process_system_vendor_product_images()
+                return props_path
+
+        elif check_zip_contains_file(file_to_process, "payload.bin", config.low_mem):
+            # -----------------------------
+            # Firmware with payload.bin
+            # -----------------------------
+            print("Detected a firmware, with payload.bin")
+            # extract the payload.bin into a temporary directory
+            print(f"Extracting payload.bin from {file_to_process} ...")
+            theCmd = f"\"{path_to_7z}\" x -bd -y -o\"{temp_dir_path}\" \"{file_to_process}\" payload.bin"
+            debug(f"{theCmd}")
+            res = run_shell(theCmd)
+            if res and isinstance(res, subprocess.CompletedProcess) and res.returncode != 0:
+                print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Could not extract payload.bin.")
                 print(f"Return Code: {res.returncode}.")
                 print(f"Stdout: {res.stdout}.")
                 print(f"Stderr: {res.stderr}.")
                 print("Aborting ...\n")
                 return
 
-            # create props folder
-            props_folder = os.path.join(config_path, "props")
-            props_path = os.path.join(props_folder, package_sig)
-            if os.path.exists(props_path):
-                shutil.rmtree(props_path)
-            os.makedirs(props_path, exist_ok=True)
-
-            # check if image file is included and contains what we need
-            if os.path.exists(image_file_path):
-                # process system.img
-                found_system_img = check_archive_contains_file(archive_file_path=image_file_path, file_to_check="system.img", nested=False, is_recursive=False)
-                if found_system_img:
-                    print(f"Extracting system.img from {image_file_path} ...")
-                    theCmd = f"\"{path_to_7z}\" x -bd -y -o\"{package_dir_full}\" \"{image_file_path}\" system.img"
-                    debug(theCmd)
-                    res = run_shell2(theCmd)
-                    img_archive = os.path.join(package_dir_full, "system.img")
-                    found_system_build_prop = check_archive_contains_file(archive_file_path=img_archive, file_to_check="build.prop", nested=False, is_recursive=False)
-                    if found_system_build_prop:
-                        print(f"Extracting build.prop from {img_archive} ...")
-                        theCmd = f"\"{path_to_7z}\" x -bd -y -o\"{props_path}\" \"{img_archive}\" {found_system_build_prop}"
-                        debug(theCmd)
-                        res = run_shell2(theCmd)
-                    if os.path.exists(os.path.join(props_path, found_system_build_prop)):
-                        os.rename(os.path.join(props_path, found_system_build_prop), os.path.join(props_path, "system-build.prop"))
-
-                # process vendor.img
-                found_vendor_img = check_archive_contains_file(archive_file_path=image_file_path, file_to_check="vendor.img", nested=False, is_recursive=False)
-                if found_vendor_img:
-                    print(f"Extracting system.img from {image_file_path} ...")
-                    theCmd = f"\"{path_to_7z}\" x -bd -y -o\"{package_dir_full}\" \"{image_file_path}\" vendor.img"
-                    debug(theCmd)
-                    res = run_shell2(theCmd)
-                    img_archive = os.path.join(package_dir_full, "vendor.img")
-                    found_vendor_build_prop = check_archive_contains_file(archive_file_path=img_archive, file_to_check="build.prop", nested=False, is_recursive=False)
-                    if found_vendor_build_prop:
-                        print(f"Extracting build.prop from {img_archive} ...")
-                        theCmd = f"\"{path_to_7z}\" x -bd -y -o\"{props_path}\" \"{img_archive}\" {found_vendor_build_prop}"
-                        debug(theCmd)
-                        res = run_shell2(theCmd)
-                    if os.path.exists(os.path.join(props_path, found_vendor_build_prop)):
-                        os.rename(os.path.join(props_path, found_vendor_build_prop), os.path.join(props_path, "vendor-build.prop"))
-
-                # process product.img
-                found_product_img = check_archive_contains_file(archive_file_path=image_file_path, file_to_check="product.img", nested=False, is_recursive=False)
-                if found_product_img:
-                    print(f"Extracting system.img from {image_file_path} ...")
-                    theCmd = f"\"{path_to_7z}\" x -bd -y -o\"{package_dir_full}\" \"{image_file_path}\" product.img"
-                    debug(theCmd)
-                    res = run_shell2(theCmd)
-                    img_archive = os.path.join(package_dir_full, "product.img")
-                    found_product_build_prop = check_archive_contains_file(archive_file_path=img_archive, file_to_check="build.prop", nested=False, is_recursive=False)
-                    if found_product_build_prop:
-                        print(f"Extracting build.prop from {img_archive} ...")
-                        theCmd = f"\"{path_to_7z}\" x -bd -y -o\"{props_path}\" \"{img_archive}\" {found_product_build_prop}"
-                        debug(theCmd)
-                        res = run_shell2(theCmd)
-                    if os.path.exists(os.path.join(props_path, found_product_build_prop)):
-                        os.rename(os.path.join(props_path, found_product_build_prop), os.path.join(props_path, "product-build.prop"))
-
-                # return path to props folder
+            payload_file_path = os.path.join(temp_dir_path, "payload.bin")
+            if os.path.exists(payload_file_path):
+                extract_payload(payload_file_path, out=temp_dir_path, diff=False, old='old', images='system,vendor,product')
+                process_system_vendor_product_images()
                 return props_path
+            return
+
+        elif check_zip_contains_file(file_to_process, "servicefile.xml", config.low_mem):
+            # -----------------------------
+            # Motorola Firmware
+            # -----------------------------
+            sparse_chunk_pattern = "system.img_sparsechunk.*"
+            sparse_chunks = check_file_pattern_in_zip_file(file_to_process, sparse_chunk_pattern, return_all_matches=True)
+            if sparse_chunks:
+                print("Detected a Motorola firmware")
+                # # Extract sparse chunks
+                # for chunk in sparse_chunks:
+                #     print(f"Extracting {chunk} from {file_to_process} ...")
+                #     theCmd = f"\"{path_to_7z}\" x -bd -y -o\"{temp_dir_path}\" \"{file_to_process}\" \"{chunk}\""
+                #     debug(theCmd)
+                #     res = run_shell2(theCmd)
+                #     if res.returncode != 0:
+                #         print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Could not extract {chunk}.")
+                #         print(f"Return Code: {res.returncode}")
+                #         print(f"Stdout: {res.stdout}")
+                #         print(f"Stderr: {res.stderr}")
+                #         print("Aborting ...\n")
+                #         return
+                # # Combine sparse chunks
+                # combined_sparse_path = os.path.join(temp_dir_path, "combined_system.img")
+                # with open(combined_sparse_path, 'wb') as combined_file:
+                #     for chunk in sparse_chunks:
+                #         chunk_path = os.path.join(temp_dir_path, chunk)
+                #         with open(chunk_path, 'rb') as chunk_file:
+                #             combined_file.write(chunk_file.read())
+                # # converting to raw image
+                # raw_image_path = os.path.join(temp_dir_path, "system.img")
+                # subprocess.run(["simg2img", combined_sparse_path, raw_image_path], check=True)
+
+        elif check_zip_contains_file(file_to_process, "system.img", config.low_mem):
+            check_for_system_vendor_product_imgs(file_to_process)
+            process_system_vendor_product_images()
+            return props_path
+
+        elif check_zip_contains_file(file_to_process, "vendor.img", config.low_mem):
+            check_for_system_vendor_product_imgs(file_to_process)
+            process_system_vendor_product_images()
+            return props_path
+
+        elif check_zip_contains_file(file_to_process, "product.img", config.low_mem):
+            check_for_system_vendor_product_imgs(file_to_process)
+            process_system_vendor_product_images()
+            return props_path
+
+        else:
+            found_ap = check_file_pattern_in_zip_file(file_to_process, "AP_*.tar.md5")
+            if found_ap is not None and found_ap != "":
+                # -----------------------------
+                # Samsung firmware
+                # -----------------------------
+                print("Detected a Samsung firmware")
+
+                # extract AP file
+                print(f"Extracting {found_ap} from {image_file} ...")
+                theCmd = f"\"{path_to_7z}\" x -bd -y -o\"{temp_dir_path}\" \"{image_file}\" {found_ap}"
+                debug(theCmd)
+                res = run_shell2(theCmd)
+                if res and isinstance(res, subprocess.CompletedProcess):
+                    debug(f"Return Code: {res.returncode}")
+                    debug(f"Stdout: {res.stdout}")
+                    debug(f"Stderr: {res.stderr}")
+                    if res.returncode != 0:
+                        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Could not extract {found_ap}.")
+                        print("Aborting ...\n")
+                        return
+                else:
+                    print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Could not extract {found_ap}.")
+                    print("Aborting ...\n")
+                    return
+                image_file_path = os.path.join(temp_dir_path, found_ap)
+                if not os.path.exists(image_file_path):
+                    print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Could not find {image_file_path}.")
+                    return
+                # extract image file
+                print(f"Extracting {image_file_path} ...")
+                theCmd = f"\"{path_to_7z}\" x -bd -y -o\"{temp_dir_path}\" \"{image_file_path}\" \"meta-data\""
+                debug(theCmd)
+                res = run_shell2(theCmd)
+                if res and isinstance(res, subprocess.CompletedProcess):
+                    debug(f"Return Code: {res.returncode}")
+                    debug(f"Stdout: {res.stdout}")
+                    debug(f"Stderr: {res.stderr}")
+                    if res.returncode != 0:
+                        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Could not extract meta-data.")
+                        print("Aborting ...\n")
+                        return
+                else:
+                    print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Could not extract meta-data.")
+                    print("Aborting ...\n")
+                    return
+
+                # get a file listing
+                file_list = get_file_list_from_directory(temp_dir_path)
+                found_fota_zip = False
+                for file_path in file_list:
+                    if "fota.zip" in file_path:
+                        found_fota_zip = True
+                        break
+
+                if found_fota_zip:
+                    # extract fota.zip
+                    print(f"Extracting fota.zip from {image_file_path} ...")
+                    theCmd = f"\"{path_to_7z}\" x -bd -y -o\"{temp_dir_path}\" \"{file_path}\" \"SYSTEM\" \"VENDOR\""
+                    debug(theCmd)
+                    res = run_shell2(theCmd)
+
+                    source_path = os.path.join(temp_dir_path, "VENDOR", "build.prop")
+                    destination_path = os.path.join(props_path, "system-build.prop")
+                    if os.path.exists(source_path):
+                        shutil.copy(source_path, destination_path)
+
+                    source_path = os.path.join(temp_dir_path, "SYSTEM", "build.prop")
+                    destination_path = os.path.join(props_path, "vendor-build.prop")
+                    if os.path.exists(source_path):
+                        shutil.copy(source_path, destination_path)
+
+                    return props_path
+
+                print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Unexpected image layout for {file_to_process}")
+                return
+
     except Exception as e:
         print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error while processing ota/firmware file:")
         traceback.print_exc()
     finally:
         temp_dir.cleanup()
+
+
+# ============================================================================
+#                               Function extract_motorola_image
+# ============================================================================
+def extract_motorola_image(moto_img_path, output_img_path):
+    """
+    Extracts a Motorola image file, skipping its custom header.
+
+    :param moto_img_path: Path to the Motorola image file.
+    :param output_img_path: Path where the extracted raw image will be saved.
+    """
+    # Motorola header signature for identification
+    moto_header_signature = b"MOTO\x13W\x9b\x00MOT_PIV_FULL256"
+    header_length = len(moto_header_signature)  # Adjust based on actual header length
+
+    try:
+        with open(moto_img_path, 'rb') as moto_file:
+            # check for the Motorola header
+            header = moto_file.read(header_length)
+            if header.startswith(moto_header_signature):
+                print("Motorola image detected, proceeding with extraction...")
+                # Skip the header to get to the actual image data
+                # moto_file.seek(header_length, os.SEEK_SET)  # Uncomment if additional bytes need to be skipped
+                # Read the rest of the file
+                image_data = moto_file.read()
+                # Save the extracted data to a new file
+                with open(output_img_path, 'wb') as output_file:
+                    output_file.write(image_data)
+                print(f"Motorola Extraction complete. Raw image saved to {output_img_path}")
+            else:
+                print("File does not have the expected Motorola header.")
+    except IOError as e:
+        print(f"Error opening or reading file: {e}")
+
+
+# ============================================================================
+#                               Function get_file_list_from_directory
+# ============================================================================
+def get_file_list_from_directory(directory):
+    try:
+        file_list = []
+        for dirpath, dirnames, filenames in os.walk(directory):
+            for filename in filenames:
+                file_list.append(os.path.join(dirpath, filename))
+        return file_list
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error in get_file_list_from_directory function")
+        traceback.print_exc()
 
 
 # ============================================================================
@@ -3186,24 +4925,51 @@ def bootloader_issue_message():
 # ============================================================================
 def download_ksu_latest_release_asset(user, repo, asset_name=None, anykernel=True):
     try:
+        url = f"https://api.github.com/repos/{user}/{repo}/releases/latest"
+        if asset_name:
+            look_for = asset_name
+        else:
+            look_for = "[all entries]"
+        print(f"Fetching latest release from {url} matching {look_for} ...")
+        response = request_with_fallback(method='GET', url=url)
+        assets = response.json().get('assets', [])
+
         if not asset_name:
-            url = f"https://api.github.com/repos/{user}/{repo}/releases/latest"
-            response = request_with_fallback(method='GET', url=url)
-            return response.json().get('assets', [])
+            return assets
 
         # Split the asset_name into parts
         parts = asset_name.split('-')
         base_name = parts[0]
+        base_name = f"{base_name}"
         version_parts = parts[1].split('.')
         fixed_version = '.'.join(version_parts[:-1])
+        variable_version = int(version_parts[-1])
 
         # Prepare the regular expression pattern
         if anykernel:
-            pattern = f"^AnyKernel3-{base_name}-{fixed_version}\.([0-9]+)(_.*|)\\.zip$"
+            pattern = re.compile(rf"^AnyKernel3-{base_name}-{fixed_version}\.([0-9]+)(_.*|)\.zip$")
         else:
-            pattern = f"^{base_name}-{fixed_version}\.([0-9]+)(_.*|)-boot\\.img\\.gz$"
+            pattern = re.compile(rf"^{base_name}-{fixed_version}\.([0-9]+)(_.*|)-boot\.img\.gz$")
 
-        return download_gh_latest_release_asset_regex(user, repo, pattern)
+        # Find the best match
+        best_match = None
+        best_version = -1
+        for asset in assets:
+            match = pattern.match(asset['name'])
+            if match:
+                asset_version = int(match[1])
+                if asset_version <= variable_version and asset_version > best_version:
+                    best_match = asset
+                    best_version = asset_version
+                    if asset_version == variable_version:
+                        break
+        if best_match:
+            print(f"Found best match KernelSU: {best_match['name']}")
+            download_file(best_match['browser_download_url'])
+            print(f"Downloaded {best_match['name']}")
+            return best_match['name']
+        else:
+            print(f"Asset {asset_name} not found in the latest release of {user}/{repo}")
     except Exception as e:
         print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error in download_ksu_latest_release_asset function")
         traceback.print_exc()
@@ -3212,11 +4978,24 @@ def download_ksu_latest_release_asset(user, repo, asset_name=None, anykernel=Tru
 # ============================================================================
 #                 Function download_gh_latest_release_asset_regex
 # ============================================================================
-def download_gh_latest_release_asset_regex(user, repo, asset_name_pattern, just_url_info=False):
+def download_gh_latest_release_asset_regex(user, repo, asset_name_pattern, just_url_info=False, include_prerelease=False):
     try:
-        url = f"https://api.github.com/repos/{user}/{repo}/releases/latest"
+        url = f"https://api.github.com/repos/{user}/{repo}/releases"
         response = request_with_fallback(method='GET', url=url)
-        assets = response.json().get('assets', [])
+        releases = response.json()
+
+        # Filter releases based on the include_prerelease flag
+        if not include_prerelease:
+            releases = [release for release in releases if not release['prerelease']]
+
+        # Get the latest release
+        latest_release = releases[0] if releases else None
+
+        if not latest_release:
+            print(f"No releases found for {user}/{repo}")
+            return
+
+        assets = latest_release.get('assets', [])
 
         # Prepare the regular expression pattern
         pattern = re.compile(asset_name_pattern)
@@ -3264,15 +5043,29 @@ def get_gh_latest_release_notes(owner, repo):
 # ============================================================================
 #                   Function get_gh_latest_release_version
 # ============================================================================
-def get_gh_latest_release_version(user, repo):
+def get_gh_latest_release_version(user, repo, include_prerelease=False):
     try:
-        # Get the latest release
-        url = f"https://api.github.com/repos/{user}/{repo}/releases/latest"
+        # Get all releases
+        url = f"https://api.github.com/repos/{user}/{repo}/releases"
         response = request_with_fallback(method='GET', url=url)
-        return response.json().get('tag_name', '')
+        releases = response.json()
+
+        # Filter releases based on the include_prerelease flag
+        if not include_prerelease:
+            releases = [release for release in releases if not release['prerelease']]
+
+        # Get the latest release
+        latest_release = releases[0] if releases else None
+
+        if not latest_release:
+            print(f"No releases found for {user}/{repo}")
+            return ''
+
+        return latest_release.get('tag_name', '')
     except Exception as e:
         print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error in get_gh_latest_release_version function")
         traceback.print_exc()
+        return ''
 
 
 # ============================================================================
@@ -3284,14 +5077,20 @@ def extract_magiskboot(apk_path, architecture, output_path):
         file_path_in_apk = f"lib/{architecture}/libmagiskboot.so"
         output_file_path = os.path.join(output_path, "magiskboot")
 
-        cmd = f"{path_to_7z} e {apk_path} -o{output_path} -r {file_path_in_apk} -y"
+        cmd = f"\"{path_to_7z}\" e \"{apk_path}\" -o\"{output_path}\" -r {file_path_in_apk} -y"
         debug(cmd)
         res = run_shell2(cmd)
-        if res.returncode != 0:
+        if res and isinstance(res, subprocess.CompletedProcess):
+            debug(f"Return Code: {res.returncode}")
+            debug(f"Stdout: {res.stdout}")
+            debug(f"Stderr: {res.stderr}")
+            if res.returncode != 0:
+                print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Could not extract from {apk_path}")
+                puml("#red:ERROR: Could not extract image;\n")
+                print("Aborting ...\n")
+                return
+        else:
             print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Could not extract from {apk_path}")
-            print(f"Return Code: {res.returncode}.")
-            print(f"Stdout: {res.stdout}.")
-            print(f"Stderr: {res.stderr}.")
             puml("#red:ERROR: Could not extract image;\n")
             print("Aborting ...\n")
             return
@@ -3307,19 +5106,30 @@ def extract_magiskboot(apk_path, architecture, output_path):
 # ============================================================================
 #                               Function request_with_fallback
 # ============================================================================
-def request_with_fallback(method, url, headers=None, data=None, stream=False):
+def request_with_fallback(method, url, headers=None, data=None, stream=False, nocache=False):
     response = 'ERROR'
+    # Initialize headers if None
+    headers = headers or {}
+
+    # Add nocache headers only when requested
+    if nocache:
+        headers.update({
+            'Cache-Control': 'no-cache, max-age=0',
+            'Pragma': 'no-cache'
+        })
+
     try:
         if check_internet():
-            response = requests.request(method, url, headers=headers, data=data, stream=stream)
-            response.raise_for_status()
+            with requests.Session() as session:
+                response = session.request(method, url, headers=headers, data=data, stream=stream)
+                response.raise_for_status()
     except requests.exceptions.SSLError:
-        # Retry with SSL certificate verification disabled
-        print(f"WARNING! Encountered SSL certification error while connecting to: {url}")
+        print(f"⚠️ WARNING! Encountered SSL certification error while connecting to: {url}")
         print("Retrying with SSL certificate verification disabled. ...")
         print("For security, you should double check and make sure your system or communication is not compromised.")
         if check_internet():
-            response = requests.request(method, url, headers=headers, data=data, verify=False, stream=stream)
+            with requests.Session() as session:
+                response = session.request(method, url, headers=headers, data=data, verify=False, stream=stream)
     except requests.exceptions.HTTPError as err:
         print(f"HTTP error occurred: {err}")
     except requests.exceptions.Timeout:
@@ -3332,7 +5142,6 @@ def request_with_fallback(method, url, headers=None, data=None, stream=False):
         print(f"An unexpected error occurred: {e}")
     return response
 
-
 # ============================================================================
 #                               Function check_internet
 # ============================================================================
@@ -3340,49 +5149,1251 @@ def check_internet():
     url = "http://www.google.com"
     timeout = 5
     try:
-        _ = requests.get(url, timeout=timeout)
+        unused = requests.get(url, timeout=timeout)
         return True
-    except requests.ConnectionError:
+    except requests.ConnectionError as e:
         print("No internet connection available.")
+        print(e)
     return False
 
 
 # ============================================================================
 #                               Function check_kb
-# Credit to hldr4 https://gist.github.com/hldr4/b933f584b2e2c3088bcd56eb056587f8
+# Credit to hldr4  for the original idea
+# https://gist.github.com/hldr4/b933f584b2e2c3088bcd56eb056587f8
 # ============================================================================
 def check_kb(filename):
     url = "https://android.googleapis.com/attestation/status"
-    headers = {'Cache-Control':'max-age=0'}
+    headers = {
+        'Cache-Control': 'no-cache, max-age=0',
+        'Pragma': 'no-cache'
+    }
     try:
-        crl = request_with_fallback(method='GET', url=url, headers=headers)
-        if crl is not None or crl != 'ERROR':
+        # Get CRL data
+        crl = request_with_fallback(method='GET', url=url, headers=headers, nocache=True)
+        if crl is not None and crl != 'ERROR':
+            last_modified = crl.headers.get('last-modified', 'Unknown')
+            content_date = crl.headers.get('date', 'Unknown')
+            print("------------------------------------------------------------------------")
+            print(f"CRL Last Modified:     {last_modified}")
+            print(f"Server Response Date:  {content_date}")
             crl = crl.json()
         else:
-            print(f"ERROR: Could not fetch CRL from {url}")
-            return False
+            print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Could not fetch CRL from {url}")
+            return ['invalid']
 
-        certs = [elem.text for elem in ET.parse(filename).getroot().iter() if elem.tag == 'Certificate']
+        print(f"\nChecking keybox: {filename} ...")
 
-        def parse_cert(cert):
-            cert = "\n".join(line.strip() for line in cert.strip().split("\n"))
-            parsed = x509.load_pem_x509_certificate(cert.encode())
-            return f'{parsed.serial_number:x}'
+        shadow_banned_list = SHADOW_BANNED_ISSUERS
+        is_sw_signed = False
+        is_google_signed = False
+        is_expired = False
+        expiring_soon = False
+        is_revoked = False
+        is_shadow_banned = False
+        long_chain = False
+        results = []
 
-        ec_cert_sn, rsa_cert_sn = parse_cert(certs[0]), parse_cert(certs[3])
+        # Parse keybox XML
+        try:
+            tree = ET.parse(filename)
+            root = tree.getroot()
+        except Exception as e:
+            print(f"❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Could not parse keybox XML {filename}")
+            print(e)
+            results.append('invalid')
+            return results
 
-        print(f'\nEC Cert SN: {ec_cert_sn}\nRSA Cert SN: {rsa_cert_sn}')
+        # 1. Validate root element is AndroidAttestation
+        if root.tag != 'AndroidAttestation':
+            print(f"❌ ERROR: Root element is not AndroidAttestation, found: {root.tag}")
+            results.append('invalid_structure')
+            return results
 
-        if any(sn in crl["entries"].keys() for sn in (ec_cert_sn, rsa_cert_sn)):
-            print('\nKeybox is revoked!')
-            return False
+        # 2. Check NumberOfKeyboxes
+        num_keyboxes = root.find('NumberOfKeyboxes')
+        if num_keyboxes is None:
+            print("❌ ERROR: Missing NumberOfKeyboxes element")
+            results.append('invalid_structure')
+            return results
+        expected_keyboxes = int(num_keyboxes.text)
+        print(f"Expected number of keyboxes: {expected_keyboxes}")
+
+        # 3. Process each Keybox
+        keyboxes = root.findall('Keybox')
+        if not keyboxes:
+            print("❌ ERROR: No Keybox elements found")
+            results.append('invalid_structure')
+            return results
+
+        if len(keyboxes) != expected_keyboxes:
+            print(f"⚠️ WARNING: NumberOfKeyboxes ({expected_keyboxes}) does not match actual keyboxes found ({len(keyboxes)})")
+
+        k = 1
+        for keybox in keyboxes:
+            wx.Yield()
+            device_id = keybox.get('DeviceID')
+            if not device_id:
+                print("❌ ERROR: Keybox missing DeviceID attribute")
+                results.append('invalid_structure')
+                continue
+            print(f"\nProcessing Keybox {k}/{expected_keyboxes} for Device ID: {device_id}")
+
+            # 4. Verify both RSA and ECDSA algorithms are present
+            required_algorithms = {'rsa', 'ecdsa'}
+            found_algorithms = set()
+
+            for key_element in keybox.findall('Key'):
+                wx.Yield()
+                algorithm = key_element.get('algorithm')
+                if not algorithm:
+                    print("  ❌ ERROR: Key element missing algorithm attribute")
+                    continue
+
+                # Process the Chain
+                algorithm = algorithm.lower()
+                print(f"\n→ Processing {algorithm} chain:")
+                found_algorithms.add(algorithm)
+
+                # 5. Check PrivateKey
+                private_key = key_element.find('PrivateKey')
+                if private_key is None:
+                    print(f"  ❌ ERROR: No PrivateKey found for {algorithm} key")
+                    results.append('missing_private_key')
+                    continue
+
+                # 6. Check CertificateChain
+                cert_chain = key_element.find('CertificateChain')
+                if cert_chain is None:
+                    print(f"  ❌ ERROR: No CertificateChain found for {algorithm} key")
+                    results.append('missing_chain')
+                    continue
+
+                # 7. Verify number of certificates matches
+                num_certs_elem = cert_chain.find('NumberOfCertificates')
+                if num_certs_elem is None:
+                    print(f"  ❌ ERROR: Missing NumberOfCertificates for {algorithm} chain")
+                    results.append('invalid_chain')
+                    continue
+
+                expected_certs = int(num_certs_elem.text)
+                actual_certs = len(cert_chain.findall('Certificate'))
+                if actual_certs != expected_certs:
+                    print(f"  ⚠️ WARNING: NumberOfCertificates ({expected_certs}) does not match actual certificates found ({actual_certs})")
+
+                # 8. Process certificates
+                certs = cert_chain.findall('Certificate')
+                if len(certs) < 2:
+                    print(f"  ❌ ERROR: {algorithm} chain must have at least 2 certificates (leaf and root)")
+                    results.append('invalid_chain')
+                    continue
+
+                # Validate certificate chain
+                try:
+                    cert_chain = []
+                    # Parse private key from the keybox
+                    private_key_text = private_key.text.strip()
+                    private_key_text = re.sub(re.compile(r'^\s+', re.MULTILINE), '', private_key_text)
+                    private_key_text = clean_pem_key(private_key_text)
+                    private_key_obj = None
+
+                    try:
+                        private_key_obj = serialization.load_pem_private_key(
+                            private_key_text.encode(),
+                            password=None
+                        )
+                    except Exception as e:
+                        if "EC curves with explicit parameters" in str(e) or "unsupported" in str(e).lower():
+                            # Set private_key_obj to a special sentinel value to indicate skipped validation.
+                            private_key_obj = "UNSUPPORTED_CURVE"
+                        else:
+                            print(f"  ❌ ERROR: Failed to parse private key for {algorithm} key: {e}")
+                            results.append('invalid_private_key')
+
+                    # Parse certificates in the chain
+                    if len(certs) > 4:
+                        long_chain = True
+                    tab_text = ""
+                    for cert in certs:
+                        wx.Yield()
+                        cert_text = cert.text.strip()
+                        parsed_cert = x509.load_pem_x509_certificate(cert_text.encode())
+                        cert_chain.append(parsed_cert)
+
+                        cert_sn, cert_issuer, cert_subject, sig_algo, expiry, key_usages, parsed, crl_distribution_points = parse_cert(cert.text)
+
+                        # Format the issuer field
+                        formatted_issuer, issuer_sn = format_dn(cert_issuer)
+
+                        if issuer_sn in shadow_banned_list:
+                            is_shadow_banned = True
+
+                        # Format the issued to field
+                        formatted_issued_to, issued_to_sn = format_dn(cert_subject)
+
+                        # indent the chain
+                        tab_text += "  "
+
+                        # redact if verbose is not set
+                        if get_verbose():
+                            cert_sn_text = cert_sn
+                            formatted_issued_to_text = formatted_issued_to
+                            formatted_issuer_text = formatted_issuer
+                        else:
+                            cert_sn_text = "REDACTED"
+                            formatted_issued_to_text = "REDACTED"
+                            formatted_issuer_text = "REDACTED"
+
+                        print(f'{tab_text}Certificate SN:          {cert_sn_text}')
+                        print(f'{tab_text}Issued to:               {formatted_issued_to_text}')
+                        print(f'{tab_text}Issuer:                  {formatted_issuer_text}')
+                        print(f'{tab_text}Signature Algorithm:     {sig_algo}')
+                        print(f'{tab_text}Key Usage:               {key_usages}')
+                        if crl_distribution_points:
+                            print(f'{tab_text}CRL Distribution Points: {crl_distribution_points}')
+                        expired_text = ""
+                        if expiry < datetime.now(timezone.utc):
+                            expired_text = " (EXPIRED)"
+                        print(f"{tab_text}Validity:                {parsed.not_valid_before_utc.date()} to {expiry.date()} {expired_text}\n")
+
+                        if "Software Attestation" in cert_issuer:
+                            is_sw_signed = True
+
+                        if issuer_sn in ['f92009e853b6b045']:
+                            is_google_signed = True
+
+                        if expiry < datetime.now(timezone.utc):
+                            is_expired = True
+                            print(f"{tab_text}❌❌❌ Certificate is EXPIRED")
+                        elif expiry < datetime.now(timezone.utc) + timedelta(days=30):
+                            expiring_soon = True
+                            print(f"{tab_text}⚠️ Certificate is EXPIRING SOON")
+
+                        if cert_sn.strip().lower() in (sn.strip().lower() for sn in crl["entries"].keys()):
+                            print(f"{tab_text}❌❌❌ Certificate is REVOKED")
+                            print(f"{tab_text}❌❌❌ Reason: {crl['entries'][cert_sn]['reason']} ***")
+                            is_revoked = True
+
+                    # First is leaf, last is root
+                    leaf_cert = cert_chain[0]
+                    root_cert = cert_chain[-1]
+                    intermediate_certs = cert_chain[1:-1]
+
+                    # Verify the private key matches the leaf certificate's public key
+                    if private_key_obj is not None and private_key_obj != "UNSUPPORTED_CURVE" and leaf_cert is not None:
+                        try:
+                            leaf_public_key = leaf_cert.public_key()
+
+                            # For RSA keys
+                            if isinstance(private_key_obj, rsa.RSAPrivateKey) and isinstance(leaf_public_key, rsa.RSAPublicKey):
+                                priv_public_numbers = private_key_obj.public_key().public_numbers()
+                                leaf_public_numbers = leaf_public_key.public_numbers()
+
+                                if (priv_public_numbers.n == leaf_public_numbers.n and
+                                    priv_public_numbers.e == leaf_public_numbers.e):
+                                    print(f"  ✅ Private key matches leaf certificate for {algorithm} chain")
+                                else:
+                                    print(f"  ❌ ERROR: Private key does not match leaf certificate for {algorithm} chain")
+                                    results.append('key_mismatch')
+
+                            # For ECDSA keys
+                            elif isinstance(private_key_obj, ec.EllipticCurvePrivateKey) and isinstance(leaf_public_key, ec.EllipticCurvePublicKey):
+                                priv_public_key = private_key_obj.public_key()
+
+                                priv_public_bytes = priv_public_key.public_bytes(
+                                    encoding=serialization.Encoding.PEM,
+                                    format=serialization.PublicFormat.SubjectPublicKeyInfo
+                                )
+
+                                leaf_public_bytes = leaf_public_key.public_bytes(
+                                    encoding=serialization.Encoding.PEM,
+                                    format=serialization.PublicFormat.SubjectPublicKeyInfo
+                                )
+
+                                if priv_public_bytes == leaf_public_bytes:
+                                    print(f"  ✅ Private key matches leaf certificate for {algorithm} chain")
+                                else:
+                                    print(f"  ❌ ERROR: Private key does not match leaf certificate for {algorithm} chain")
+                                    results.append('key_mismatch')
+                            else:
+                                print(f"  ❌ ERROR: Mismatched key types between private key and certificate for {algorithm} chain")
+                                results.append('key_mismatch')
+                        except Exception as e:
+                            print(f"  ❌ ERROR: Failed to verify key pair match: {e}")
+                            results.append('key_mismatch')
+                    elif private_key_obj == "UNSUPPORTED_CURVE":
+                        print(f"  ⚠️ WARNING: Skipped private key validation due to unsupported curve format")
+
+                    # Validate the certificate chain
+                    try:
+                        # Verify leaf is signed by first intermediate (or root if no intermediates)
+                        current_cert = leaf_cert
+                        next_cert = intermediate_certs[0] if intermediate_certs else root_cert
+
+                        # Verify leaf cert is signed by next cert in chain
+                        public_key = next_cert.public_key()
+                        if isinstance(public_key, rsa.RSAPublicKey):
+                            try:
+                                public_key.verify(
+                                    current_cert.signature,
+                                    current_cert.tbs_certificate_bytes,
+                                    padding.PKCS1v15(),
+                                    current_cert.signature_hash_algorithm
+                                )
+                            except Exception as e:
+                                print(f"  ❌ ERROR: RSA Certificate chain validation failed for {algorithm}: {e}")
+                                results.append('invalid_chain')
+                        elif isinstance(public_key, ec.EllipticCurvePublicKey):
+                            try:
+                                public_key.verify(
+                                    current_cert.signature,
+                                    current_cert.tbs_certificate_bytes,
+                                    ec.ECDSA(current_cert.signature_hash_algorithm)
+                                )
+                            except Exception as e:
+                                print(f"  ❌ ERROR: ECDSA Certificate chain validation failed for {algorithm}: {e}")
+                                results.append('invalid_chain')
+
+                        # Verify the rest of the chain
+                        for i in range(len(intermediate_certs)):
+                            wx.Yield()
+                            current_cert = intermediate_certs[i]
+                            next_cert = intermediate_certs[i + 1] if i + 1 < len(intermediate_certs) else root_cert
+
+                            # Verify current_cert was signed by next_cert
+                            public_key = next_cert.public_key()
+                            if isinstance(public_key, rsa.RSAPublicKey):
+                                try:
+                                    public_key.verify(
+                                        current_cert.signature,
+                                        current_cert.tbs_certificate_bytes,
+                                        padding.PKCS1v15(),
+                                        current_cert.signature_hash_algorithm
+                                    )
+                                except Exception as e:
+                                    print(f"  ❌ RSA Certificate chain validation failed for {algorithm}: {e}")
+                                    results.append('invalid_chain')
+                            elif isinstance(public_key, ec.EllipticCurvePublicKey):
+                                try:
+                                    public_key.verify(
+                                        current_cert.signature,
+                                        current_cert.tbs_certificate_bytes,
+                                        ec.ECDSA(current_cert.signature_hash_algorithm)
+                                    )
+                                except Exception as e:
+                                    print(f"  ❌ ECDSA Certificate chain validation failed for {algorithm}: {e}")
+                                    results.append('invalid_chain')
+                            else:
+                                print(f"  ❌ ERROR: Unsupported public key type for {algorithm}")
+                                results.append('invalid_chain')
+                                # raise ValueError("Unsupported public key type")
+
+                        # Finally verify root signed the last intermediate (if any intermediates exist)
+                        if intermediate_certs:
+                            public_key = root_cert.public_key()
+                            if isinstance(public_key, rsa.RSAPublicKey):
+                                public_key.verify(
+                                    intermediate_certs[-1].signature,
+                                    intermediate_certs[-1].tbs_certificate_bytes,
+                                    padding.PKCS1v15(),
+                                    intermediate_certs[-1].signature_hash_algorithm
+                                )
+                            elif isinstance(public_key, ec.EllipticCurvePublicKey):
+                                public_key.verify(
+                                    intermediate_certs[-1].signature,
+                                    intermediate_certs[-1].tbs_certificate_bytes,
+                                    ec.ECDSA(intermediate_certs[-1].signature_hash_algorithm)
+                                )
+
+                        print(f"  ✅ Certificate chain validation successful for {algorithm}")
+
+                    except Exception as e:
+                        print(f"  ❌ Certificate chain validation failed for {algorithm}: {e}")
+                        results.append('invalid_chain')
+
+                except Exception as e:
+                    print(f"❌ ERROR validating certificate chain: {e}")
+                    results.append('invalid_chain')
+
+            # Check if all required algorithms were found
+            missing_algorithms = required_algorithms - found_algorithms
+            if missing_algorithms:
+                print(f"\n❌ Missing required algorithm chains: {', '.join(missing_algorithms)}")
+                results.append('missing_algorithms')
+
+            k += 1
+
+        if is_revoked:
+            print(f"\n❌❌❌ Keybox {filename} contains revoked certificates!")
+            results.append('revoked')
         else:
-            print('\nKeybox is still valid!')
-            return True
+            print(f"\n✅ certificates in Keybox {filename} are not on the revocation list")
+            results.append('valid')
+        if is_expired:
+            print(f"\n❌❌❌ Keybox {filename} contains expired certificates!")
+            results.append('expired')
+        if is_sw_signed or not is_google_signed:
+            print(f"⚠️ Keybox {filename} is software signed! This is not a hardware-backed keybox!")
+            results.append('aosp')
+        if expiring_soon:
+            print(f"⚠️ Keybox {filename} contains certificates that are expiring soon!")
+            results.append('expiring_soon')
+        if long_chain:
+            print(f"⚠️ Keybox {filename} contains certificates longer chain than normal, this may no work.")
+            results.append('long_chain')
+        if is_shadow_banned:
+            print(f"\n❌❌❌ Keybox {filename} has certificate(s) issued by an authority in shadow banned list!")
+            results.append('shadow_banned')
+        print('')
+        return results
     except Exception as e:
         print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error in check_kb function")
         print(e)
         traceback.print_exc()
+
+
+# ============================================================================
+#                               Function to clean_pem_key
+# ============================================================================
+def clean_pem_key(key_text):
+    # Key with spaces instead of newlines (common in XML)
+    if '-----BEGIN' in key_text and '\n' not in key_text:
+        # Split at the BEGIN marker
+        parts = re.split(r'(-----BEGIN [^-]+-----)', key_text)
+        if len(parts) >= 3:
+            header = parts[1]
+            # Split at the END marker
+            content_parts = re.split(r'(-----END [^-]+-----)', parts[2])
+            if len(content_parts) >= 2:
+                # Extract the base64 content and format with newlines
+                content = content_parts[0].strip()
+                content_chunks = content.split()
+                formatted_content = '\n'.join(content_chunks)
+                footer = content_parts[1]
+                # Reassemble the key
+                key_text = f"{header}\n{formatted_content}\n{footer}"
+    return key_text
+
+
+# ============================================================================
+#                               Function to parse the certificate
+# ============================================================================
+def parse_cert(cert):
+    import logging
+    from cryptography.x509.oid import ExtensionOID
+
+    cert = "\n".join(line.strip() for line in cert.strip().split("\n"))
+    parsed = x509.load_pem_x509_certificate(cert.encode(), default_backend())
+    issuer = None
+    subject = None
+    serial_number = None
+    sig_algo = None
+    expiry = None
+    key_usages = 'None'
+    crl_distribution_points = None
+
+    try:
+        issuer = parsed.issuer.rfc4514_string()
+    except Exception as e:
+        logging.error(f"Issuer extraction failed: {e}")
+    try:
+        subject = parsed.subject.rfc4514_string()
+    except Exception as e:
+        logging.error(f"Subject extraction failed: {e}")
+    try:
+        serial_number = f'{parsed.serial_number:x}'
+    except Exception as e:
+        logging.error(f"Serial number extraction failed: {e}")
+    try:
+        sig_algo = parsed.signature_algorithm_oid._name
+    except Exception as e:
+        logging.error(f"Signature algorithm extraction failed: {e}")
+    try:
+        expiry = parsed.not_valid_after_utc
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=timezone.utc)
+    except Exception as e:
+        logging.error(f"Expiry extraction failed: {e}")
+    try:
+        key_usage_ext = parsed.extensions.get_extension_for_oid(ExtensionOID.KEY_USAGE)
+        key_usage = key_usage_ext.value
+        allowed_usages = []
+        if key_usage.digital_signature:
+            allowed_usages.append("Digital Signature")
+        if key_usage.content_commitment:
+            allowed_usages.append("Content Commitment")
+        if key_usage.key_encipherment:
+            allowed_usages.append("Key Encipherment")
+        if key_usage.data_encipherment:
+            allowed_usages.append("Data Encipherment")
+        if key_usage.key_agreement:
+            allowed_usages.append("Key Agreement")
+            # Only check encipher_only and decipher_only if key_agreement is True
+            if key_usage.encipher_only:
+                allowed_usages.append("Encipher Only")
+            if key_usage.decipher_only:
+                allowed_usages.append("Decipher Only")
+        if key_usage.key_cert_sign:
+            allowed_usages.append("Certificate Signing")
+        if key_usage.crl_sign:
+            allowed_usages.append("CRL Signing")
+        if allowed_usages:
+            key_usages = ", ".join(allowed_usages)
+    except Exception as e:
+        logging.error(f"Key usage extraction failed: {e}")
+
+    # Extract CRL Distribution Points
+    try:
+        crl_ext = parsed.extensions.get_extension_for_oid(ExtensionOID.CRL_DISTRIBUTION_POINTS)
+        if crl_ext:
+            crl_points = []
+            for point in crl_ext.value:
+                if point.full_name:
+                    for name in point.full_name:
+                        if name.value:
+                            crl_points.append(name.value)
+            if crl_points:
+                crl_distribution_points = crl_points
+    except Exception as e:
+        if not "ObjectIdentifier(oid=2.5.29.31" in str(e):
+            logging.error(f"CRL distribution points extraction failed: {e}")
+
+    return serial_number, issuer, subject, sig_algo, expiry, key_usages, parsed, crl_distribution_points
+
+
+# ============================================================================
+#                               Function to format the DN string
+# ============================================================================
+def format_dn(dn):
+    try:
+        formatted = []
+        sn = ""
+        # Split the DN string by commas not preceded by a backslash (escape character)
+        parts = re.split(r'(?<!\\),', dn)
+        for part in parts:
+            part = part.replace("\\,", ",")  # Replace escaped commas with actual commas
+            if part.startswith("2.5.4.5="):
+                sn = part.split("=")[1]
+                formatted.insert(0, sn)
+            else:
+                formatted.append(part.split("=")[1])
+        if formatted:
+            return ", ".join(formatted), sn
+        else:
+            return "UNKNOWN", sn
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error in format_dn function")
+        print(e)
+        traceback.print_exc()
+        return "UNKNOWN", sn
+
+
+# ============================================================================
+#                               Function get_boot_image_info
+# ============================================================================
+def get_boot_image_info(boot_image_path):
+    try:
+        tool = avbtool.AvbTool()
+        if not os.path.exists(boot_image_path):
+            print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Boot image file not found: {boot_image_path}")
+            return
+        info = tool.run(['avbtool.py','info_image', '--image', boot_image_path])
+        print('')
+        return info
+
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error in get_boot_image_info function")
+        print(e)
+        traceback.print_exc()
+
+
+# ============================================================================
+#                               Function add_hash_footer
+# ============================================================================
+def add_hash_footer(boot_image_path,
+                    partition_size,
+                    partition_name,
+                    salt,
+                    rollback_index,
+                    algorithm,
+                    hash_algorithm,
+                    prop_com_android_build_boot_os_version,
+                    prop_com_android_build_boot_fingerprint,
+                    prop_com_android_build_boot_security_patch_level
+                ):
+
+    try:
+        tool = avbtool.AvbTool()
+        tool.run(['avbtool.py','add_hash_footer',
+                    '--image', boot_image_path,
+                    '--partition_size', partition_size,
+                    '--partition_name', partition_name,
+                    '--salt', salt,
+                    '--rollback_index', rollback_index,
+                    '--key', os.path.join(get_bundle_dir(), 'testkey_rsa4096.pem'),
+                    '--algorithm', algorithm,
+                    '--hash_algorithm', hash_algorithm,
+                    '--prop', f'com.android.build.boot.os_version:{prop_com_android_build_boot_os_version}',
+                    '--prop', f'com.android.build.boot.fingerprint:{prop_com_android_build_boot_fingerprint}',
+                    '--prop', f'com.android.build.boot.security_patch:{prop_com_android_build_boot_security_patch_level}'
+                ])
+
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error in add_hash_footer function")
+        print(e)
+        traceback.print_exc()
+
+
+# ============================================================================
+#                               Function run_tool
+# ============================================================================
+def run_tool(tool_details):
+    try:
+        config = get_config()
+        command = tool_details['command']
+        arguments = tool_details['arguments']
+        directory = tool_details['directory']
+        method = tool_details.get('method', 'Method 3')
+        if method == 'Method 1':
+            shell_method = 'run_shell'
+        elif method == 'Method 2':
+            shell_method = 'run_shell2'
+        elif method == 'Method 3':
+            shell_method = 'run_shell3'
+        elif method == 'Method 4':
+            # this one is not a function
+            shell_method = 'run_shell4'
+        detached = tool_details.get('detached', True)
+
+        theCmd = f"\"{command}\" {arguments}"
+        if sys.platform.startswith("win"):
+            debug(theCmd)
+            if shell_method == 'run_shell4':
+                subprocess.Popen(theCmd, creationflags=subprocess.CREATE_NEW_CONSOLE, start_new_session=detached, env=get_env_variables())
+            else:
+                # Dynamic function invocation
+                res = globals()[shell_method](theCmd, directory=directory, detached=detached, creationflags=subprocess.CREATE_NEW_CONSOLE)
+        elif sys.platform.startswith("linux") and config.linux_shell:
+            theCmd = f"{get_linux_shell()} -- /bin/bash -c {theCmd}"
+            debug(theCmd)
+            if shell_method == 'run_shell4':
+                subprocess.Popen(theCmd, start_new_session=detached)
+            else:
+                # Dynamic function invocation
+                res = globals()[shell_method](theCmd, detached=detached)
+        elif sys.platform.startswith("darwin"):
+            script_file = tempfile.NamedTemporaryFile(delete=False, suffix='.sh')
+            script_file_content = f'#!/bin/bash\n{theCmd}\nrm "{script_file.name}"'
+            debug(script_file_content)
+            script_file.write(script_file_content.encode('utf-8'))
+            script_file.close()
+            os.chmod(script_file.name, 0o755)
+            theCmd = f"osascript -e 'tell application \"Terminal\" to do script \"{script_file.name}\"'"
+            debug(theCmd)
+            if shell_method == 'run_shell4':
+                subprocess.Popen(['osascript', '-e', f'tell application "Terminal" to do script "{script_file.name}"'], start_new_session=detached, env=get_env_variables())
+            else:
+                # Dynamic function invocation with additional environment variables
+                res = globals()[shell_method](theCmd, detached=detached, env=get_env_variables())
+
+        return 0
+    except Exception as e:
+        print(f"Failed to run tool: {e}")
+
+
+# ============================================================================
+#                           Function get_db_con
+# ============================================================================
+def get_db_con():
+    try:
+        con = get_db()
+        if con is None:
+            print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Failed to get database connection.")
+            return None
+        con.execute("PRAGMA foreign_keys = ON")
+        con.commit()
+        return con
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error in get_db_con function")
+        traceback.print_exc()
+        return None
+
+
+# ============================================================================
+#               Function find_package_ids_with_same_package_boot_hash
+# ============================================================================
+def find_package_ids_with_same_package_boot_hash(boot_hash):
+    con = get_db_con()
+    if con is None:
+        return []
+
+    sql = """
+        SELECT p.id
+        FROM PACKAGE p
+        WHERE p.boot_hash = ?;
+    """
+    try:
+        with con:
+            data = con.execute(sql, (boot_hash,))
+            package_ids = [row[0] for row in data.fetchall()]
+        return package_ids
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error while fetching package IDs.")
+        puml("#red:Encountered an error while fetching package IDs;\n", True)
+        traceback.print_exc()
+        return []
+
+
+# ============================================================================
+#               Function get_package_sig
+# ============================================================================
+def get_package_sig(package_id):
+    con = get_db_con()
+    if con is None:
+        return None
+
+    sql = """
+        SELECT p.package_sig
+        FROM PACKAGE p
+        WHERE p.id = ?;
+    """
+    try:
+        with con:
+            data = con.execute(sql, (package_id,))
+            row = data.fetchone()
+            if row:
+                return row[0]
+            else:
+                return None
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error while fetching package_sig.")
+        puml("#red:Encountered an error while fetching package_sig;\n", True)
+        traceback.print_exc()
+        return None
+
+
+# ============================================================================
+#               Function get_boot_id_by_file_path
+# ============================================================================
+def get_boot_id_by_file_path(file_path):
+    con = get_db_con()
+    if con is None:
+        return None
+
+    sql = """
+        SELECT b.id
+        FROM boot b
+        WHERE b.file_path = ?;
+    """
+    try:
+        with con:
+            data = con.execute(sql, (file_path,))
+            row = data.fetchone()
+            if row:
+                return row[0]
+            else:
+                return None
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error in function get_boot_id_by_file_path.")
+        puml("#red:Encountered an error in function get_boot_id_by_file_path;\n", True)
+        traceback.print_exc()
+        return None
+
+
+# ============================================================================
+#               Function delete_package_boot_record
+# ============================================================================
+def delete_package_boot_record(boot_id, package_id):
+    con = get_db_con()
+    if con is None or boot_id is None or package_id is None or boot_id == 0 or package_id == 0 or boot_id == '' or package_id == '':
+        return False
+
+    sql = """
+        DELETE FROM PACKAGE_BOOT
+        WHERE boot_id = ? AND package_id = ?;
+    """
+    try:
+        with con:
+            con.execute(sql, (boot_id, package_id))
+        con.commit()
+        return True
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error in function delete_package_boot_record.")
+        puml("#red:Encountered an error in function delete_package_boot_record;\n", True)
+        traceback.print_exc()
+        return False
+
+
+# ============================================================================
+#               Function delete_boot_record
+# ============================================================================
+def delete_boot_record(boot_id, delete_file=''):
+    con = get_db_con()
+    if con is None or boot_id is None or boot_id == 0 or boot_id == '':
+        return None
+
+    sql = """
+        DELETE FROM BOOT
+        WHERE id = ?;
+    """
+    try:
+        with con:
+            data = con.execute(sql, (boot_id,))
+        con.commit()
+        print(f"Cleared db entry for BOOT: {boot_id}")
+        # delete the boot file
+        if delete_file != '':
+            print(f"Deleting Boot file: {delete_file} ...")
+            if os.path.exists(delete_file):
+                os.remove(delete_file)
+                boot_dir = os.path.dirname(delete_file)
+                # if deleting init_boot.img and boot.img exists, delete that as well
+                boot_img_path = os.path.join(boot_dir, 'boot.img')
+                if os.path.exists(boot_img_path) and delete_file.endswith('init_boot.img'):
+                    print(f"Deleting {boot_img_path} ...")
+                    os.remove(boot_img_path)
+            else:
+                print(f"⚠️ Warning: Boot file: {delete_file} does not exist")
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error in function delete_boot_record.")
+        puml("#red:Encountered an error in function delete_boot_record;\n", True)
+        traceback.print_exc()
+        return None
+
+
+# ============================================================================
+#               Function delete_last_boot_record
+# ============================================================================
+def delete_last_boot_record(boot_id, boot_path=''):
+    con = get_db_con()
+    if con is None or boot_id is None or boot_id == 0 or boot_id == '':
+        return False
+
+    # Check to see if this is the last entry for the boot_id, if it is delete it,
+    try:
+        cursor = con.cursor()
+        cursor.execute("SELECT * FROM PACKAGE_BOOT WHERE boot_id = ?", (boot_id,))
+        data = cursor.fetchall()
+        if len(data) == 0:
+            # delete the boot from db
+            delete_boot_record(boot_id, boot_path)
+        return True
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error in function delete_last_boot_record.")
+        puml("#red:Encountered an error in function delete_last_boot_record;\n", True)
+        traceback.print_exc()
+        print("Aborting ...")
+        return False
+
+# ============================================================================
+#               Function delete_last_package_record
+# ============================================================================
+# Check to see if this is the last entry for the package_id, if it is,
+# delete the package from db and output a message that a firmware should be selected.
+# Also delete unpacked files from factory_images cache
+def delete_last_package_record(package_ids, boot_dir):
+    con = get_db_con()
+    if con is None:
+        return False
+
+    try:
+        cursor = con.cursor()
+        package_ids_tuple = tuple(package_ids)
+        placeholders = []
+        for unused in package_ids_tuple:
+            placeholders.append('?')
+        placeholders = ','.join(placeholders)
+        query = f"SELECT * FROM PACKAGE_BOOT WHERE package_id IN ({placeholders})"
+        cursor.execute(query, package_ids_tuple)
+        data = cursor.fetchall()
+        if len(data) == 0:
+            delete_package = True
+            # see if there are any other files in the directory
+            files = get_filenames_in_dir(boot_dir)
+            if files:
+                delete_package = False
+
+            if delete_package:
+                config_path = get_config_path()
+                for package_id in package_ids:
+                    package_sig = get_package_sig(package_id)
+                    sql = """
+                        DELETE FROM PACKAGE
+                        WHERE id = ?;
+                    """
+                    with con:
+                        con.execute(sql, (package_id,))
+                    con.commit()
+                    if package_sig:
+                        print(f"Cleared db entry for PACKAGE: {package_sig}")
+                        package_path = os.path.join(config_path, 'factory_images', package_sig)
+                        with contextlib.suppress(Exception):
+                            print(f"Deleting Firmware cache for: {package_path} ...")
+                            delete_all(package_path)
+                    else:
+                        print(f"⚠️ Warning: Package Signature for package_id: {package_id} does not exist")
+        return True
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error in function delete_last_package_record.")
+        puml("#red:Encountered an error in function delete_last_package_record;\n", True)
+        traceback.print_exc()
+        print("Aborting ...")
+        return False
+
+
+# ============================================================================
+#               Function insert_boot_record
+# ============================================================================
+def insert_boot_record(boot_hash, file_path, is_patched, magisk_version, hardware, patch_method, is_odin, is_stock_boot, is_init_boot, patch_source_sha1):
+    con = get_db_con()
+    if con is None:
+        return None
+
+    try:
+        cursor = con.cursor()
+        sql = """
+            INSERT INTO BOOT (boot_hash, file_path, is_patched, magisk_version, hardware, epoch, patch_method, is_odin, is_stock_boot, is_init_boot, patch_source_sha1)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (boot_hash) DO NOTHING
+        """
+        data = (boot_hash, file_path, is_patched, magisk_version, hardware, time.time(), patch_method, is_odin, is_stock_boot, is_init_boot, patch_source_sha1)
+        debug(f"Creating BOOT record, boot_hash: {boot_hash}")
+        try:
+            cursor.execute(sql, data)
+            con.commit()
+            boot_id = cursor.lastrowid
+            debug(f"DB BOOT record ID: {boot_id}")
+        except Exception as e:
+            print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error while inserting BOOT record.")
+            puml("#red:Encountered an error while inserting BOOT record;\n", True)
+            traceback.print_exc()
+            boot_id = 0
+        return boot_id
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error in function insert_boot_record.")
+        puml("#red:Encountered an error in function insert_boot_record;\n", True)
+        traceback.print_exc()
+        return 0
+
+
+# ============================================================================
+#               Function insert_package_boot_record
+# ============================================================================
+def insert_package_boot_record(package_id, boot_id):
+    con = get_db_con()
+    if con is None:
+        return None
+
+    try:
+        cursor = con.cursor()
+
+        sql = """
+            INSERT INTO PACKAGE_BOOT (package_id, boot_id, epoch)
+            VALUES (?, ?, ?)
+            ON CONFLICT (package_id, boot_id) DO NOTHING
+        """
+        data = (package_id, boot_id, time.time())
+        try:
+            cursor.execute(sql, data)
+            con.commit()
+            package_boot_id = cursor.lastrowid
+            debug(f"DB Package_Boot record ID: {package_boot_id}\n")
+        except Exception as e:
+            print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error while inserting PACKAGE_BOOT record.")
+            puml("#red:Encountered an error while inserting PACKAGE_BOOT record;\n", True)
+            traceback.print_exc()
+            package_boot_id = 0
+        return package_boot_id
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error in function insert_package_boot_record.")
+        puml("#red:Encountered an error in function insert_package_boot_record;\n", True)
+        traceback.print_exc()
+        return 0
+
+
+# ============================================================================
+#                               Function magisk_apks
+# ============================================================================
+def get_magisk_apks():
+    global _magisk_apks
+    if _magisk_apks is None:
+        try:
+            apks = []
+            mlist = ['Magisk Stable', 'Magisk Beta', 'Magisk Canary', 'Magisk Debug', 'KitsuneMagisk Fork', "KernelSU", 'KernelSU-Next', 'APatch', "Magisk zygote64_32 canary", "Magisk special 27001", "Magisk special 26401", 'Magisk special 25203']
+            for i in mlist:
+                apk = get_magisk_apk_details(i)
+                if apk:
+                    apks.append(apk)
+            _magisk_apks = apks
+        except Exception as e:
+            _magisk_apks is None
+            print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Exception during Magisk downloads link: {i} processing")
+            traceback.print_exc()
+    return _magisk_apks
+
+
+# ============================================================================
+#                               Function get_magisk_apk_details
+# ============================================================================
+def get_magisk_apk_details(channel):
+    ma = MagiskApk(channel)
+    if channel == 'Magisk Stable':
+        url = "https://raw.githubusercontent.com/topjohnwu/magisk-files/master/stable.json"
+
+    elif channel == 'Magisk Beta':
+        url = "https://raw.githubusercontent.com/topjohnwu/magisk-files/master/beta.json"
+
+    elif channel == 'Magisk Canary':
+        url = "https://raw.githubusercontent.com/topjohnwu/magisk-files/master/canary.json"
+
+    elif channel == 'Magisk Debug':
+        url = "https://raw.githubusercontent.com/topjohnwu/magisk-files/master/debug.json"
+
+    elif channel == 'Magisk Alpha':
+        try:
+            # Now published at appcenter: https://install.appcenter.ms/users/vvb2060/apps/magisk/distribution_groups/public
+            info_endpoint = "https://install.appcenter.ms/api/v0.1/apps/vvb2060/magisk/distribution_groups/public/public_releases?scope=tester"
+            release_endpoint = "https://install.appcenter.ms/api/v0.1/apps/vvb2060/magisk/distribution_groups/public/releases/{}"
+            res = request_with_fallback(method='GET', url=info_endpoint)
+            latest_id = res.json()[0]['id']
+            res = request_with_fallback(method='GET', url=release_endpoint.format(latest_id))
+            latest_release = res.json()
+            setattr(ma, 'version', latest_release['short_version'])
+            setattr(ma, 'versionCode', latest_release['version'])
+            setattr(ma, 'link', latest_release['download_url'])
+            setattr(ma, 'note_link', "note_link")
+            setattr(ma, 'package', latest_release['bundle_identifier'])
+            setattr(ma, 'release_notes', latest_release['release_notes'])
+            return ma
+        except Exception as e:
+            print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Exception during Alpha processing")
+            traceback.print_exc()
+            return
+    elif channel == 'KitsuneMagisk Fork':
+        url = "https://1q23lyc45.github.io/canary.json"
+
+    elif channel == 'Magisk Delta Canary':
+        url = "https://raw.githubusercontent.com/HuskyDG/magisk-files/main/canary.json"
+
+    elif channel == 'Magisk Delta Debug':
+        url = "https://raw.githubusercontent.com/HuskyDG/magisk-files/main/debug.json"
+
+    elif channel == 'KernelSU':
+        try:
+            # https://github.com/tiann/KernelSU/releases
+            kernelsu_version = get_gh_latest_release_version('tiann', 'KernelSU')
+            kernelsu_release_notes = get_gh_latest_release_notes('tiann', 'KernelSU')
+            kernelsu_url = download_gh_latest_release_asset_regex('tiann', 'KernelSU', r'^KernelSU.*\.apk$', True)
+            if kernelsu_url is None:
+                print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Could not find KernelSU APK")
+                return
+            match = re.search(r'_([0-9]+)-', kernelsu_url)
+            if match:
+                kernelsu_versionCode =  match.group(1)
+            else:
+                if kernelsu_version:
+                    kernelsu_versionCode = kernelsu_version
+                else:
+                    # parts = version.split('.')
+                    # a = int(parts[0])
+                    # b = int(parts[1])
+                    # c = int(parts[2])
+                    # kernelsu_versionCode = (a * 256 * 256) + (b * 256) + c
+                    kernelsu_versionCode = 0
+            setattr(ma, 'version', kernelsu_version)
+            setattr(ma, 'versionCode', kernelsu_versionCode)
+            setattr(ma, 'link', kernelsu_url)
+            setattr(ma, 'note_link', "note_link")
+            setattr(ma, 'package', KERNEL_SU_PKG_NAME)
+            setattr(ma, 'release_notes', kernelsu_release_notes)
+            return ma
+        except Exception as e:
+            print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Exception during KernelSU processing")
+            traceback.print_exc()
+            return
+
+    elif channel == 'KernelSU-Next':
+        try:
+            # https://github.com/rifsxd/KernelSU-Next/releases
+            kernelsu_next_version = get_gh_latest_release_version('rifsxd', 'KernelSU-Next')
+            kernelsu_next_release_notes = get_gh_latest_release_notes('rifsxd', 'KernelSU-Next')
+            kernelsu_next_url = download_gh_latest_release_asset_regex('rifsxd', 'KernelSU-Next', r'^KernelSU_Next.*\.apk$', True)
+            if kernelsu_next_url is None:
+                print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Could not find KernelSU-Next APK")
+                return
+            match = re.search(r'_([0-9]+)-', kernelsu_next_url)
+            if match:
+                kernelsu_next_versionCode =  match.group(1)
+            else:
+                if kernelsu_next_version:
+                    kernelsu_next_versionCode = kernelsu_next_version
+                else:
+                    # parts = version.split('.')
+                    # a = int(parts[0])
+                    # b = int(parts[1])
+                    # c = int(parts[2])
+                    # kernelsu_next_versionCode = (a * 256 * 256) + (b * 256) + c
+                    kernelsu_next_versionCode = 0
+            setattr(ma, 'version', kernelsu_next_version)
+            setattr(ma, 'versionCode', kernelsu_next_versionCode)
+            setattr(ma, 'link', kernelsu_next_url)
+            setattr(ma, 'note_link', "note_link")
+            setattr(ma, 'package', KSU_NEXT_PKG_NAME)
+            setattr(ma, 'release_notes', kernelsu_next_release_notes)
+            return ma
+        except Exception as e:
+            print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Exception during KernelSU Next processing")
+            traceback.print_exc()
+            return
+
+    elif channel == 'APatch':
+        try:
+            # https://github.com/bmax121/APatch/releases
+            apatch_version = get_gh_latest_release_version('bmax121', 'APatch')
+            apatch_release_notes = get_gh_latest_release_notes('bmax121', 'APatch')
+            apatch_url = download_gh_latest_release_asset_regex('bmax121', 'APatch', r'^APatch_.*\.apk$', True)
+            if apatch_url is None:
+                print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Could not find APatch APK")
+                return
+            match = re.search(r'_([0-9]+)-', apatch_url)
+            if match:
+                apatch_versionCode =  match.group(1)
+            else:
+                if apatch_version:
+                    apatch_versionCode = apatch_version
+                else:
+                    # parts = version.split('.')
+                    # a = int(parts[0])
+                    # b = int(parts[1])
+                    # c = int(parts[2])
+                    # apatch_versionCode = (a * 256 * 256) + (b * 256) + c
+                    apatch_versionCode = 0
+            setattr(ma, 'version', apatch_version)
+            setattr(ma, 'versionCode', apatch_versionCode)
+            setattr(ma, 'link', apatch_url)
+            setattr(ma, 'note_link', "note_link")
+            setattr(ma, 'package', APATCH_PKG_NAME)
+            setattr(ma, 'release_notes', apatch_release_notes)
+            return ma
+        except Exception as e:
+            print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Exception during APatch processing")
+            traceback.print_exc()
+            return
+    elif channel == 'Magisk zygote64_32 stable':
+        url = "https://raw.githubusercontent.com/Namelesswonder/magisk-files/main/stable.json"
+
+    elif channel == 'Magisk zygote64_32 beta':
+        url = "https://raw.githubusercontent.com/Namelesswonder/magisk-files/main/beta.json"
+
+    elif channel == 'Magisk zygote64_32 canary':
+        # url = "https://raw.githubusercontent.com/Namelesswonder/magisk-files/main/canary.json"
+        url = "https://raw.githubusercontent.com/ActiveIce/Magisk_zygote64_32/master/canary.json"
+
+    elif channel == 'Magisk zygote64_32 debug':
+        url = "https://raw.githubusercontent.com/Namelesswonder/magisk-files/main/debug.json"
+
+    elif channel == 'Magisk special 25203':
+        url = ""
+        setattr(ma, 'version', "f9e82c9e")
+        setattr(ma, 'versionCode', "25203")
+        setattr(ma, 'link', "https://github.com/badabing2005/Magisk/releases/download/versionCode_25203/app-release.apk")
+        setattr(ma, 'note_link', "note_link")
+        setattr(ma, 'package', MAGISK_PKG_NAME)
+        release_notes = """
+## 2022.10.03 Special Magisk v25.2 Build\n\n
+This is a special Magisk build by XDA Member [gecowa6967](https://xdaforums.com/m/gecowa6967.11238881/)\n\n
+- Based on build versionCode: 25203 versionName: f9e82c9e\n
+- Modified to disable loading modules.\n
+- Made to recover from bootloops due to bad / incompatible Modules.\n\n
+### Steps to follow
+If your are bootlooping due to bad modules, and if you load stock boot image, it works fine but you're not rooted to removed modules, then follow these steps.\n\n
+- Uninstall the currently installed Magisk Manager.\n
+- Install this special version.\n
+- Create a patched boot / init_boot using this Magisk Manager version.\n
+- Flash the patched image.\n
+- You should now be able to get root access, and your modules will not load.\n
+- Delete / Disable suspect modules.\n
+- Uninstall this Magisk Manager.\n
+- Install your Magisk Manager of choice.\n
+- Create patched boot / init_boot image.\n
+- Flash the patched image.\n
+- You should be good to go.\n\n
+### Full Details: [here](https://xdaforums.com/t/magisk-general-support-discussion.3432382/page-2667#post-87520397)\n
+        """
+        setattr(ma, 'release_notes', release_notes)
+        return ma
+
+    elif channel == 'Magisk special 26401':
+        url = ""
+        setattr(ma, 'version', "76aef836")
+        setattr(ma, 'versionCode', "26401")
+        setattr(ma, 'link', "https://github.com/badabing2005/Magisk/releases/download/versionCode_26401/app-release.apk")
+        setattr(ma, 'note_link', "note_link")
+        setattr(ma, 'package', MAGISK_PKG_NAME)
+        release_notes = """
+## 2023.11.12 Special Magisk v26.4 Build\n\n
+This is a special Magisk build\n\n
+- Based on build versionCode: 26401 versionName: 76aef836\n
+- Modified to disable loading modules while keep root.\n
+- Made to recover from bootloops due to bad / incompatible Modules.\n\n
+### Steps to follow [here](https://github.com/badabing2005/Magisk)\n
+        """
+        setattr(ma, 'release_notes', release_notes)
+        return ma
+    elif channel == 'Magisk special 27001':
+        url = ""
+        setattr(ma, 'version', "79fd3e40")
+        setattr(ma, 'versionCode', "27001")
+        setattr(ma, 'link', "https://github.com/badabing2005/Magisk/releases/download/versionCode_27001/app-release.apk")
+        setattr(ma, 'note_link', "note_link")
+        setattr(ma, 'package', MAGISK_PKG_NAME)
+        release_notes = """
+## 2024.02.12 Special Magisk v27.0 Build\n\n
+This is a special Magisk build\n\n
+- Based on build versionCode: 27001 versionName: 79fd3e40\n
+- Modified to disable loading modules while keep root.\n
+- Made to recover from bootloops due to bad / incompatible Modules.\n\n
+### Steps to follow [here](https://github.com/badabing2005/Magisk)\n
+        """
+        setattr(ma, 'release_notes', release_notes)
+        return ma
+
+    else:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Unknown Magisk channel {channel}\n")
+        return
+
+    try:
+        payload={}
+        headers = {
+            'Content-Type': "application/json"
+        }
+        response = request_with_fallback(method='GET', url=url, headers=headers, data=payload)
+        if response.status_code != 200:
+            print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Could not get Magisk downloads links: {url}")
+            return
+        data = response.json()
+        setattr(ma, 'version', data['magisk']['version'])
+        setattr(ma, 'versionCode', data['magisk']['versionCode'])
+        setattr(ma, 'link', data['magisk']['link'])
+        note_link = data['magisk']['note']
+        setattr(ma, 'note_link', note_link)
+        setattr(ma, 'package', MAGISK_PKG_NAME)
+        if channel in ['Magisk Delta Canary', 'Magisk Delta Debug', 'KitsuneMagisk Fork']:
+            setattr(ma, 'package', MAGISK_DELTA_PKG_NAME)
+        # Get the note contents
+        headers = {}
+        with contextlib.suppress(Exception):
+            setattr(ma, 'release_notes', '')
+            response = request_with_fallback(method='GET', url=ma.note_link, headers=headers, data=payload)
+            if response.status_code != 200:
+                print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Could not get Magisk download release_notes: {url}")
+                return
+            setattr(ma, 'release_notes', response.text)
+        return ma
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Exception during Magisk downloads links: {url} processing")
+        traceback.print_exc()
+        return
 
 
 # ============================================================================
@@ -3399,6 +6410,7 @@ def run_shell(cmd, timeout=None, encoding='ISO-8859-1'):
         stdout, stderr = process.communicate(timeout=timeout)
         # Return the response
         return subprocess.CompletedProcess(args=cmd, returncode=process.returncode, stdout=stdout, stderr=stderr)
+
     except subprocess.TimeoutExpired as e:
         print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Command {cmd} timed out after {timeout} seconds")
         puml("#red:Command {cmd} timed out;\n", True)
@@ -3421,13 +6433,40 @@ def run_shell(cmd, timeout=None, encoding='ISO-8859-1'):
 #                               Function run_shell2
 # ============================================================================
 # This one pipes the stdout and stderr to Console text widget in realtime,
-def run_shell2(cmd, timeout=None, detached=False, directory=None, encoding='ISO-8859-1'):
+def run_shell2(cmd, timeout=None, detached=False, directory=None, encoding='utf-8', chcp=None):
     try:
         flush_output()
+
+        env = get_env_variables()
+        env["PYTHONIOENCODING"] = encoding
+        if chcp is not None:
+            env["CHCP"] = chcp
+
         if directory is None:
-            proc = subprocess.Popen(f"{cmd}", shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, encoding=encoding, errors="replace", start_new_session=detached, env=get_env_variables())
+            proc = subprocess.Popen(
+                f"{cmd}",
+                shell=True,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                encoding=encoding,
+                errors="replace",
+                start_new_session=detached,
+                env=env
+            )
         else:
-            proc = subprocess.Popen(f"{cmd}", cwd=directory, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, encoding=encoding, errors="replace", start_new_session=detached, env=get_env_variables())
+            proc = subprocess.Popen(
+                f"{cmd}",
+                cwd=directory,
+                shell=True,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                encoding=encoding,
+                errors="replace",
+                start_new_session=detached,
+                env=env
+            )
 
         print
         while True:
@@ -3456,6 +6495,64 @@ def run_shell2(cmd, timeout=None, detached=False, directory=None, encoding='ISO-
         # return subprocess.CompletedProcess(args=cmd, returncode=-2, stdout='', stderr='')
 
 
+# ============================================================================
+#                               Function run_shell3
+# ============================================================================
+# This one pipes the stdout and stderr to Console text widget in realtime,
+def run_shell3(cmd, timeout=None, detached=False, directory=None, encoding='ISO-8859-1', creationflags=0, env=None):
+    try:
+        flush_output()
+        proc_args = {
+            "args": f"{cmd}",
+            "shell": True,
+            "stdin": subprocess.PIPE,
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.STDOUT,
+            "encoding": encoding,
+            "errors": "replace",
+            "start_new_session": detached,
+        }
+        if env is not None:
+            proc_args["env"] = env
+        if creationflags is not None:
+            proc_args["creationflags"] = creationflags
+        if directory is not None:
+            proc_args["cwd"] = directory
+
+        proc = subprocess.Popen(**proc_args)
+
+        def read_output():
+            print
+            start_time = time.time()
+            output = []
+            while True:
+                line = proc.stdout.readline()
+                wx.YieldIfNeeded()
+                if line.strip() != "":
+                    print(line.strip())
+                    output.append(line.strip())
+                if not line:
+                    break
+                if timeout is not None and time.time() - start_time > timeout:
+                    proc.terminate()
+                    print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Command {cmd} timed out after {timeout} seconds")
+                    puml("#red:Command timed out;\n", True)
+                    puml(f"note right\nCommand {cmd} timed out after {timeout} seconds\nend note\n")
+                    return subprocess.CompletedProcess(args=cmd, returncode=-1, stdout='\n'.join(output), stderr='')
+
+        threading.Thread(target=read_output, daemon=True).start()
+        if not detached:
+            proc.wait()
+        return proc
+
+    except Exception as e:
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error while executing run_shell3 {cmd}")
+        traceback.print_exc()
+        puml("#red:Encountered an error;\n", True)
+        puml(f"note right\n{e}\nend note\n")
+        raise e
+        # return subprocess.CompletedProcess(args=cmd, returncode=-2, stdout='', stderr='')
+
 
 # def run_shell(*args, **kwargs):
 #     pr = cProfile.Profile()
@@ -3468,8 +6565,9 @@ def run_shell2(cmd, timeout=None, detached=False, directory=None, encoding='ISO-
 
 #     # Get the calling function and line number
 #     stack = traceback.extract_stack()
-#     filename, lineno, function_name, _ = stack[-3]  # -3 because -1 is current function, -2 is the function that called this function
+#     filename, lineno, function_name, unused = stack[-3]  # -3 because -1 is current function, -2 is the function that called this function
 #     print(f"Called from {function_name} at {filename}:{lineno}")
 
 #     print(s.getvalue())
 #     return result
+

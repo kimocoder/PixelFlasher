@@ -1,13 +1,41 @@
-<img src="/images/icon-dark-128.png" align="left" />
-  <h1> PixelFlasher </h1>
+<div id="toc">
+  <img src="/images/icon-dark-128.png" alt="PixelFlasher Icon" align="left" />
+  <ul style="list-style: none;">
+    <summary>
+      <h1>PixelFlasher</h1>
+    </summary>
+  </ul>
+</div>
 
 [![License](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0) [![Github Releases](https://img.shields.io/github/downloads/badabing2005/PixelFlasher/total.svg?style=flat)](https://github.com/badabing2005/PixelFlasher/releases)
 
-## DESCRIPTION
+<BR>
+
+## Table of contents
+
+- [Table of contents](#table-of-contents)
+- [Description / Features](#description--features)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+  - [Release Files](#release-files)
+  - [Supported platforms](#supported-platforms)
+- [Status](#status)
+- [Build it yourself](#build-it-yourself)
+- [Usage](#usage)
+  - [Basic Mode](#basic-mode)
+  - [Expert Mode](#expert-mode)
+- [Translations](#translations)
+  - [Contributing Translations](#contributing-translations)
+  - [Translation Limitations](#translation-limitations)
+- [Credits](#credits)
+- [Troubleshooting](#troubleshooting)
+- [Disclaimer](#disclaimer)
+
+## Description / Features
 
 As the name suggests this is an application to flash (update) Pixel™ phones (possibly all Google™ made phones/tablets, YMMV.)  
-PixelFlasher at its core is a UI layer (with bells and whistles) on top of adb / fastboot commands, hence many of its features can be used on non Pixel devices as well. (YMMV).  
-The executable which can be found in [releases section](https://github.com/badabing2005/PixelFlasher/releases) is self contained and does not require Python™ to be installed on the system.
+PixelFlasher at its core is a UI layer (with bells and whistles) on top of adb / fastboot commands, hence **many of its features can be used on non Pixel devices as well.** (YMMV).  
+The executable which can be found in [releases section](https://github.com/badabing2005/PixelFlasher/releases) is self contained single file and does not require Python™ to be installed on the system.
 
 The application has two modes, normal mode (basic) and advanced mode (expert).
 
@@ -36,9 +64,8 @@ No more setting airplane mode and clearing storage to retain Safetynet / Play In
   - Hardware model.
   - Device architecture.
   - Current installed firmware (build).
-  - If it is rooted with Magisk.
-  - Magisk version (Magisk Tools).
-  - Magisk Manager version (the app).
+  - If it is rooted and with which tool and version.
+  - Which of the supported rooting applications are installed and their respective versions.
   - List installed Magisk modules.
   - Connection mode (Adb | Fastboot | Sideload | Recovery).
   - Bootloader version.
@@ -46,13 +73,23 @@ No more setting airplane mode and clearing storage to retain Safetynet / Play In
   - Android OS API version.
   - Convenient quick links to download Android platform tools or device firmware.
   - And a lot more...
-- Magisk Manager installation UI, [screenshot](images/Magisk-Installer.png). Supported versions:
+- In app download of all Pixel phone / watch firmware images and full OTA images (past an present).
+- Rooting Application installation UI, [screenshot](images/Magisk-Installer.png). Supported versions:
   - stable (official)
   - beta (official)
   - canary (official)
   - debug (official)
-  - delta
-  - special builds that disable modules (used to recover from bootloops due to bad module(s) when safe mode does not work).
+  - alpha
+  - delta canary (Kitsune)
+  - delta debug (Kitsune)
+  - KernelSU
+  - KernelSU-Next
+  - Apatch
+  - Magisk zygote64_32 canary
+  - Special builds that disable modules (used to recover from bootloops due to bad modules).
+    - Magisk special v27001
+    - Magisk special v26401
+    - Magisk special v25203
 - Magisk Backup Manager, [screenshot](images/Magisk-Backup-Manager.png).
   - List all Magisk backups currently on the device.
   - Highlight the one that is backup of the current installed version.
@@ -61,7 +98,11 @@ No more setting airplane mode and clearing storage to retain Safetynet / Play In
   - Auto Backup: PixelFlasher figures out what needs to be backed up, and if it finds it on the PC, it creates the backup.
 - Magisk settings management, [screenshot](images/magisk-settings.png):
   - Enable / disable Magisk modules, this comes in handy to disable suspect modules before an upgrade.
-  - Install Magisk module.
+  - Install Magisk module (zip selection).
+  - Direct install common Magisk modules:
+    - osm0sis [PlayintegrityFork](https://github.com/osm0sis/PlayIntegrityFork)
+    - [TrickyStore](https://github.com/5ec1cff/TrickyStore)
+    - [ZygiskNext](https://github.com/Dr-TSNG/ZygiskNext)
   - Enable / disable Zygisk.
   - Enable / disable Magisk denylist.
   - Add / remove application to Magisk denylist (through PixelFlasher's App Manger).
@@ -77,22 +118,85 @@ No more setting airplane mode and clearing storage to retain Safetynet / Play In
 - Easily open ADB shell to the device.
 - Support for Genymotion Scrcpy to mirror Android devices (video and audio) via USB or over TCP/IP, and allows to control the device with the keyboard and the mouse of the computer.
 - A lot of checks and validations for smooth operation with quite verbose console output to inform about every step of the operation.
-- Automatic check for program updates.
-- Package (Application) Manager, [screenshot](images/Package-Manager.png):
+- Automatic check for program and Magisk module updates.
+- App Manager, [screenshot](images/Package-Manager.png):
   - Disable (Freeze)
   - Enable
   - Uninstall
   - Install APK
   - Download APK
+  - Launch
+  - Kill
+  - Clear Application Data
   - Multi-Select
   - Show Package Details.
-  - Add app to Magisk denylist.
+  - Add / remove app to Magisk denylist.
   - Control app's superuser permissions, [screenshot](images/su-permissions.png).
+  - Export Application list
+  - Filtering
+- Configurable Toolbar
+- Pif Manager (see a bit outdated but still valid [UI Workflow](https://xdaforums.com/t/pixelflasher-a-gui-tool-for-flashing-updating-rooting-managing-pixel-phones.4415453/post-87412305))
+  - Automatically detect Pif related installed modules and manage.
+    - Pull / Modify / Push Pif prints to device
+    - Cleanup DroidGuard
+    - Push keybox.xml
+    - Edit TrickyStore Target
+    - Process an image file to extract Pif print
+    - Process build prop(s) to extract Pif Print
+    - Check / Auto-check Play Integrity.
+      - Play Integrity API Checker
+      - Simple Play Integrity Checker
+      - Android Integrity Checker
+      - TB Checker
+      - Play Store
+      - YASNAC
+    - Automatically get Pixel Beta Pif ()
+    - Get Xiaomi Pif
+    - Get TheFreeman193 random Pif
+    - Conversion tools
+    - Built in json validation
+- PI (Play Integrity) Analysis Report to troubleshoot PI related issues.
+  - Magisk (if available):
+    - modules list.
+    - denylist.
+  - TrickyStore (if available):
+    - `/data/adb/tricky_store/spoof_build_vars`
+    - `/data/adb/tricky_store/keybox.xml` (Not the contents, just if the certificates are revoked or not)
+    - `/data/adb/tricky_store/target.txt`
+  - PlayIntegrity Fork (if available):
+    - `/data/adb/modules/playintegrityfix/custom.pif.json`
+    - `/data/adb/modules/playintegrityfix/custom.app_replace.list`
+    - `/data/adb/modules/playintegrityfix/scripts-only-mode`
+  - PlayIntegrityFix (if available):
+    - `/data/adb/modules/playintegrityfix/pif.json`
+    - `/data/adb/pif.json`
+  - Whether a testkey ROM is used or not.
+  - logcat for PlayIntegrity and TrickyStore related logs.
+  - Droidguard VM list.
+  - If any custom ROM injection apps are installed from:
+    - Xiaomi.eu
+    - EliteRoms
+    - helluvaOS
+    - hentaiOS
+    - Evolution X
+    - PixelOS
+  - Check overlays (if contents of /debug_ramdisk is visible without root)
+- My Tools, add / remove and manage personal tools to be launched from within the app.
+- Dev Tools
+  - Check keybox validity (one or many)
+    - If the certificates in the keybox are on revocation list.
+    - If they are AOSP certificates
+    - If they are expired or expiring soon.
+    - If they are long chained.
+    - If any of the certificate issuers are on shadow banned list.
+  - AVB Image info tool
+  - AVB downgrade preparation tool.
 
 **Expert mode:** (should only be turned on by experienced users). In addition to the basic features, you get:
 
 - The ability to flash custom ROM (with or without patching `boot` / `init_boot`)
 - Option to flash to both slots.
+- Option to flash to inactive slot.
 - Options to disable verity and or verification.
 - Ability to change the active slot.
 - Ability to live boot to custom `boot` / `init_boot` (temporary root).
@@ -101,7 +205,7 @@ No more setting airplane mode and clearing storage to retain Safetynet / Play In
 - Ability to sideload an image.
 - Lock / Unlock bootloader.
 - Option to gain temporary root (good for testing or checking things out).
-- SOS Disable Magisk modules to get out of bootloop (experimental).
+- SOS Disable Magisk modules to get out of bootloop.
 - Force option when flashing.
 - Option to skip rebooting.
 - Option to wipe.
@@ -112,20 +216,43 @@ No more setting airplane mode and clearing storage to retain Safetynet / Play In
 ## Prerequisites
 
 - [Android SDK Platform-Tools](https://developer.android.com/studio/releases/platform-tools.html).
+- USB Debug turned on in Developer Options and authorized for your computer. (see excellent guide links in credits section below).
 - Android Pixel phone [factory image](https://developers.google.com/android/images) or Android Pixel phone [full OTA image](https://developers.google.com/android/ota).
-- Bootloader unlocked phone (see excellent guide links in credits section below).
+- Bootloader unlocked phone if you want to root or flash Factory image (see excellent guide links in credits section below).
+  **Note:** Stock OTA sideloading does not require an unlocked bootloader.
 - On Windows: The latest [Google USB drivers](https://developer.android.com/studio/run/win-usb?authuser=1%2F) installed in adb and fastboot modes.
 - On MacOS: [Allow USB Accessory to connect](https://support.apple.com/en-us/102282) (very important!).
+- On Linux: [User needs to be added](https://developer.android.com/studio/run/device#setting-up) to `plugdev` group.
+  Arch distro users, you might want to check [this](https://github.com/badabing2005/PixelFlasher/issues/283).
 
 ## Installation
 
 PixelFlasher doesn't have to be installed, just double-click it and it'll start.  
 Check the [releases section](https://github.com/badabing2005/PixelFlasher/releases) for downloads.  
 
+### Release Files
+
+[![Windows](https://img.shields.io/badge/-Windows_x64-blue.svg?style=for-the-badge&logo=windows)](https://github.com/badabing2005/PixelFlasher/releases/latest/download/PixelFlasher.exe)[![Linux](https://img.shields.io/badge/-Linux-red.svg?style=for-the-badge&logo=linux)](https://github.com/badabing2005/PixelFlasher/releases/latest/download/PixelFlasher_Ubuntu_24_04)[![MacOS](https://img.shields.io/badge/-MacOS-black.svg?style=for-the-badge&logo=apple)](https://github.com/badabing2005/PixelFlasher/releases/latest/download/PixelFlasher_macos.dmg)[![Other variants](https://img.shields.io/badge/-Other-grey.svg?style=for-the-badge)](#release-files)[![All versions](https://img.shields.io/badge/-All_Versions-lightgrey.svg?style=for-the-badge)](https://github.com/badabing2005/PixelFlasher/releases)
+
+File|Description
+:---|:---
+[PixelFlasher.exe](https://github.com/badabing2005/PixelFlasher/releases/latest/download/PixelFlasher.exe)|Windows standalone x64 binary (recommended for **Windows**)
+[PixelFlasher-arm64.exe](https://github.com/badabing2005/PixelFlasher/releases/latest/download/PixelFlasher-arm64.exe)|Windows standalone arm64 binary (recommended for **Windows arm64**)
+[PixelFlasher_win_2019.exe](https://github.com/badabing2005/PixelFlasher/releases/latest/download/PixelFlasher_win_2019.exe)| Built with Windows 2019, to be used on older Windows)
+[PixelFlasher_MacOS.dmg](https://github.com/badabing2005/PixelFlasher/releases/latest/download/PixelFlasher_MacOS.dmg)|Universal MacOS (11+) standalone executable (recommended for **MacOS**)
+[PixelFlasher_MacOS_legacy.dmg](https://github.com/badabing2005/PixelFlasher/releases/latest/download/PixelFlasher_MacOS_legacy.dmg)|x86_64 MacOS standalone executable (to be used on older MacOS devices)
+[PixelFlasher_Ubuntu_24_04](https://github.com/badabing2005/PixelFlasher/releases/latest/download/PixelFlasher_Ubuntu_24_04)| Built on Ubuntu 24.04 Linux standalone x64 binary (recommended for **Linux**)
+[PixelFlasher_Ubuntu_22_04](https://github.com/badabing2005/PixelFlasher/releases/latest/download/PixelFlasher_Ubuntu_22_04)| Built on Ubuntu 22.04 Linux standalone x64 binary
+
 ### Supported platforms  
 
 - Windows
-- MacOSX
+- macOS. Download the DMG or Install via [Homebrew](https://brew.sh) by a single command:
+
+  ```bash
+  brew install badabing2005/pixelflasher/pixelflasher
+  ```
+
 - Linux (See [this](https://github.com/badabing2005/PixelFlasher/issues/23) if you're having issues with a Linux build.)
 
 ## Status
@@ -162,6 +289,8 @@ pip install -U \
     wxPython
 ```
 
+If you're building on Fedora, take a look at [this](https://github.com/badabing2005/PixelFlasher/issues/262) (Credit to @xChAmeLIoNz).
+
 **A note on Windows**
 If you run into troubles installing wxPython on Windows, you can download wxPython wheel file matching your version of Python™ from [here](https://wxpython.org/Phoenix/snapshot-builds/?C=M;O=D)
 Look for `cp310` if your python™ version is 3.10
@@ -193,9 +322,8 @@ Run `build.bat` on Windows or `build.sh` on Linux / MacOS.
 
 ![Image of PixelFlasher GUI](/images/basic-gui.png)
 
-1. First thing to do is select Android™ Platform Tools, if Android™ Platform Tools is already in your `PATH` environment, the application will detect it and pre-populate it.  
-Otherwise you'd have to select where it is installed.  
-You can download the lastest Android™ Platform Tools by clicking the ![Image of link](/images/open-link-16.png) next to it.  
+1. First thing to do is select Android™ Platform Tools, you'd have to select where it is installed (unpacked).
+You can download the latest Android™ Platform Tools by clicking the ![Image of link](/images/open-link-16.png) next to it.  
 If you have multiple versions, you can select another version, although it is best to always use the most recent version (The selected version will be identified and displayed.)  
 2. Hit the `Scan` button to detect connected devices, the application will detect all connected devices  
 (in adb, fastboot, sideload, recovery modes) and populate the combo box (2).
@@ -211,13 +339,13 @@ The following information about the connected device is displayed.
     - (4th field) Device hardware.
     - (5th field) Current running firmware (in fastboot mode current firmware cannot be determined).
 4. Next select the full OTA (recommended) or factory zip file (don't unzip), the application will recognize the phone model from the image name and validate the SHA-256 checksum.  
-You can download [factory images](https://developers.google.com/android/images) by clicking the ![Image of link](/images/open-link-16.png) next to it.
-You can download full OTA images from [here](https://developers.google.com/android/ota).
+You can download both OTA and factory images by clicking the ![Image of link](/images/open-link-16.png) next to it.
 **Note:** Because both firmware package and full OTA are complete images, you can upgrade to any newer version without worrying about jumping versions (downgrades with factory image are possible only with wipe data).
+⚠️ Do not rename the downloaded file or extract parts of it, just point to the downloaded zip. PixelFlasher does validations to ensure you don't accidentally flash the wrong image to your device.
 5. Process the full OTA or factory image.
 PixelFlasher will extract `boot.img` (or `init_boot.img` for Pixel 7 or newer devices) file from the image and populate it in the list below (5).  
 6. Select `boot.img` (or `init_boot.img` for Pixel 7 or newer devices) from the list, the selected file can be patched (6), or flashed (10).
-7. Optional: Select this option if you want to patch the `boot.img` (or `init_boot.img` for Pixel 7 or newer devices) with Magisk. If Magisk is not already installed on your phone, PixelFlasher will install it for you.
+7. Optional: Select this option if you want to patch the `boot.img` (or `init_boot.img` for Pixel 7 or newer devices) with Magisk, Apatch, KernelSU or KernelSU-Next. If rooting application is not already installed on your phone, PixelFlasher will install it for you.
 Your phone does not need to be rooted to create a patched file.
 This would be the typical choice for monthly updates.  
 This option will allow updating the phone without losing root (not even temporarily).  
@@ -240,7 +368,7 @@ The following details are listed.
       Features of this mode:
         - This will always flash to **inactive slot only**, (hence why the option to flash to both slots is disabled) similar to how OTA updates happen on the phone.
         - It will always be **Keep Data**, there is no option for **Wipe**, hence why the option is disabled.
-        - If something goes wrong during flashing, the active flash is uneffected and the phone boots back to active functional slot.
+        - If something goes wrong during flashing, the active slot is unaffected and the phone boots back to active functional slot.
         - If you flash to both slots (ie flash twice in a row) then both slots would be bootable.
         - Your phone's bootloader does not have to be unlocked to be able to flash full OTA image (stock boot only).
         - You cannot downgrade with OTA, the version being installed has to be equal or higher.
@@ -256,7 +384,7 @@ The following details are listed.
 **Note**: Unlike the previous versions of the PixelFlasher, all the options are dynamic, i.e. depending on what you select before clicking the Flash button, there is no more concept of prepared package.
 PixelFlasher will first present you the selected options and ask for your confirmation if you want to proceed with flashing.
 12. Monitor the **console** output and observe the performed actions and their outcomes.
-13. In case of trouble, click on **Support** button to generate santized (redacted) support logs archive.
+13. In case of trouble, click on **Support** button to generate encrypted and optionally sanitized (redacted) support logs archive.
 
 ### Expert Mode
 
@@ -305,25 +433,48 @@ Choose the dropdown to select image type.
 Select the appropriate flash options.
 **Note:** For Tensor devices (Pixel 6 or newer devices) When `Flash to both slots` option is selected, Pixelflasher flashes each slot individually to overcome a Google bug that fails with the option `--slot=all`
 
+## Translations
+
+PixelFlasher currently includes French and Spanish translations, which were created using online translation tools. While these translations are functional, they may contain inaccuracies or awkward phrasing.
+
+### Contributing Translations
+
+If you'd like to help improve existing translations or add support for a new language:
+
+- Use `locale\en\LC_MESSAGES\pixelflasher.po` as your template for translation.
+- Submit your corrections or new language translations as a pull request.
+
+### Translation Limitations
+
+Please note the following about translations in PixelFlasher:
+
+- Not all strings are translated; some will never be translated while others may be added in the future.
+- Standard output (stdout) and console logs will never be translated.
+- UI sizes and positions may be disrupted by languages that require more space (or much less space) for text elements - these UI adjustments won't be made to accommodate different languages.
+
+Your help improving translations is greatly appreciated!
+
 ## Credits
 
 - First and foremost [Magisk](https://github.com/topjohnwu/Magisk/releases) by [John Wu](https://github.com/topjohnwu) which made rooting Pixel™ phones possible, without it none of this would have mattered.
 - Big thanks to [[ryder203]](https://www.t-ryder.de/), [[t-ryder]](https://xdaforums.com/m/t-ryder.3705546/) for his valuable ideas, feedback and testing. Your contributions are very much appreciated.
-- [[Homeboy76]](https://xdaforums.com/m/homeboy76.4810220/), [[v0latyle]](https://xdaforums.com/m/v0latyle.3690504/) and [[roirraW-edor-ehT]](https://xdaforums.com/m/roirraw-edor-eht.2560614/) at [xda](https://xdaforums.com/) for their excellent guides [[here](https://xdaforums.com/t/guide-november-6-2023-root-pixel-8-pro-unlock-bootloader-pass-safetynet-both-slots-bootable-more.4638510/#post-89128833/), [here](https://xdaforums.com/t/guide-pixel-6-oriole-unlock-bootloader-update-root-pass-safetynet.4356233/) and [here](https://xdaforums.com/t/november-6-2023-ud1a-231105-004-magisk-stable-v26-4-released-unlock-bootloader-root-pixel-8-pro-husky-safetynet.4633839/)] on Pixel™ series phones.
+- [[Homeboy76]](https://xdaforums.com/m/homeboy76.4810220/), [[v0latyle]](https://xdaforums.com/m/v0latyle.3690504/) and [[roirraW-edor-ehT]](https://xdaforums.com/m/roirraw-edor-eht.2560614/) at [xda](https://xdaforums.com/) for their excellent guides [[here](https://xdaforums.com/t/guide-november-6-2023-root-pixel-8-pro-unlock-bootloader-pass-safetynet-both-slots-bootable-more.4638510/#post-89128833/), [here](https://xdaforums.com/t/guide-pixel-6-oriole-unlock-bootloader-update-root-pass-safetynet.4356233/) and [here](https://xdaforums.com/t/november-6-2023-ud1a-231105-004-magisk-stable-v26-4-released-unlock-bootloader-root-pixel-8-pro-husky-safetynet.4633839/) and many more] on Pixel™ series phones (The guide concepts are generic and can be applied to any Pixel devices).
 This program could not have been possible without their easy to follow guides.  
 I strongly encourage all beginners to follow those guides rather than use this program, it is important to understand the basic steps involved before diving into one click tools or advanced tasks.
 - Marcel Stör's [nodemcu-pyflasher](https://github.com/marcelstoer/nodemcu-pyflasher) source code which jump started my introduction to [wxPython](https://www.wxpython.org/) and eventually this program.
-- [wxPython Team](https://wxpython.org/) for their corss-platform GUI toolkit for Python.
+- [wxPython Team](https://wxpython.org/) for their cross-platform GUI toolkit for Python.
 - [JackMcKew](https://github.com/JackMcKew) for pyinstaller Github Actions.
 - Endless counts of [xda](https://xdaforums.com/) members and their posts that tirelessly answer questions and share tools. Too many to enumerate.
 - Artwork / graphics / icons, designed and supplied by: [[ryder203]](https://www.t-ryder.de/), [[t-ryder]](https://xdaforums.com/m/t-ryder.3705546/) based on [material-design-icons](https://github.com/google/material-design-icons/blob/master/LICENSE)
 - vm03's [payload_dumper](https://github.com/vm03/payload_dumper) source code to extract images from payload.bin files.
+- [osm0sis](https://github.com/osm0sis) for the creative and pioneer approach to beta pif print extraction, [banned kernel list](https://xdaforums.com/t/module-play-integrity-fix-safetynet-fix.4607985/page-518#post-89308909) and endless other contributions that are too many to enumerate.
+- [capntrips](https://github.com/capntrips) for code / tools and mentoring provided to create features like `Downgrade Patch` and `Cancel OTA Update`.
 
 ## Troubleshooting
 
-If you need support or assistance, please **generate and provide a support file** from within PixelFlasher.
+If you need support or assistance, please first [search Github issues](https://github.com/badabing2005/PixelFlasher/issues?q=) and [XDA Forums](https://xdaforums.com/search/) to see if it is already reported / resolved, if not, please **generate and provide a support file** from within PixelFlasher.
 You can hit that big Support button on the main screen, or select it from the Help menu.
-The generated support.zip file is sanitized (redacted) to keep your sensitive information (username device id ...) private.
+The generated support.zip file is encrypted and optionally sanitized (redacted) to keep your sensitive information (username device id ...) private.
 
 - If your anti-virus program is telling you that PixelFlasher is a malware, or you are concerned in any way, please check [this post](https://xdaforums.com/t/pixelflasher-a-gui-tool-for-flashing-updating-rooting-managing-pixel-phones.4415453/post-89090938) about false positives.
 

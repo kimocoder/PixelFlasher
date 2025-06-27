@@ -1,5 +1,38 @@
 #!/usr/bin/env python
 
+# This file is part of PixelFlasher https://github.com/badabing2005/PixelFlasher
+#
+# Copyright (C) 2025 Badabing2005
+# SPDX-FileCopyrightText: 2025 Badabing2005
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# This program is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, either version 3 of the License, or (at your option) any
+# later version.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License
+# for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+#
+# Also add information on how to contact you by electronic and paper mail.
+#
+# If your software can interact with users remotely through a computer network,
+# you should also make sure that it provides a way for users to get its source.
+# For example, if your program is a web application, its interface could
+# display a "Source" link that leads users to an archive of the code. There are
+# many ways you could offer source, and different solutions will be better for
+# different programs; see section 13 for the specific requirements.
+#
+# You should also get your employer (if you work as a programmer) or school, if
+# any, to sign a "copyright disclaimer" for the program, if necessary. For more
+# information on this, and how to apply and follow the GNU AGPL, see
+# <https://www.gnu.org/licenses/>.
+
 import webbrowser
 
 import darkdetect
@@ -10,7 +43,7 @@ import wx.html
 from runtime import *
 
 class MessageBoxEx(wx.Dialog):
-    def __init__(self, *args, title=None, message=None, button_texts=None, default_button=None, disable_buttons=None, is_md=False, size=(800, 600), checkbox_labels=None, **kwargs):
+    def __init__(self, *args, title=None, message=None, button_texts=None, default_button=None, disable_buttons=None, is_md=False, size=(800, 600), checkbox_labels=None, checkbox_initial_values=None, **kwargs):
         wx.Dialog.__init__(self, *args, **kwargs)
         self.SetTitle(title)
         self.button_texts = button_texts
@@ -19,13 +52,18 @@ class MessageBoxEx(wx.Dialog):
         self.return_value = None
         self.checkboxes = []
         self.checkbox_labels = checkbox_labels
+        if checkbox_initial_values is not None:
+            self.checkbox_initial_values = checkbox_initial_values
+        else:
+            self.checkbox_initial_values = []
 
         vSizer = wx.BoxSizer(wx.VERTICAL)
         message_sizer = wx.BoxSizer(wx.HORIZONTAL)
 
         if is_md:
             self.html = wx.html.HtmlWindow(self, wx.ID_ANY, size=size)
-            md_html = markdown.markdown(message)
+            message = message.strip()  # Remove leading/trailing whitespace
+            md_html = markdown.markdown(message, extensions=['extra'])
 
             # Adjust colors for dark mode on Mac and Linux
             if darkdetect.isDark() and sys.platform != "win32":
@@ -56,8 +94,11 @@ class MessageBoxEx(wx.Dialog):
 
         if checkbox_labels is not None:
             checkbox_sizer = wx.StaticBoxSizer(wx.StaticBox(self, wx.ID_ANY), wx.HORIZONTAL)
-            for checkbox_label in checkbox_labels:
+            for i in range(len(checkbox_labels)):
+                checkbox_label = checkbox_labels[i]
                 checkbox = wx.CheckBox(self, wx.ID_ANY, checkbox_label, wx.DefaultPosition, wx.DefaultSize, 0)
+                if i < len(self.checkbox_initial_values):
+                    checkbox.SetValue(self.checkbox_initial_values[i])
                 self.checkboxes.append(checkbox)
                 checkbox_sizer.Add(checkbox, 0, wx.ALL, 5)
             vSizer.Add(checkbox_sizer, 0, wx.EXPAND | wx.ALL, 10)

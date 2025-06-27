@@ -1,16 +1,39 @@
+#
+# Copyright (C) 2025 Badabing2005
+# SPDX-FileCopyrightText: 2025 Badabing2005
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# This program is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, either version 3 of the License, or (at your option) any
+# later version.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License
+# for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+#
+# Also add information on how to contact you by electronic and paper mail.
+#
+# If your software can interact with users remotely through a computer network,
+# you should also make sure that it provides a way for users to get its source.
+# For example, if your program is a web application, its interface could
+# display a "Source" link that leads users to an archive of the code. There are
+# many ways you could offer source, and different solutions will be better for
+# different programs; see section 13 for the specific requirements.
+#
+# You should also get your employer (if you work as a programmer) or school, if
+# any, to sign a "copyright disclaimer" for the program, if necessary. For more
+# information on this, and how to apply and follow the GNU AGPL, see
+# <https://www.gnu.org/licenses/>.
+
 name: Build for Ubuntu 22.04
 
-env:
-  ACTIONS_RUNTIME_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-# Controls when the workflow will run
 on:
-  # push:
-    # # Sequence of patterns matched against refs/tags
-    # tags:
-    # - 'v*' # Push events to matching v*, i.e. v1.0, v20.15.10
-
-  # Allows you to run this workflow manually from the Actions tab
+  workflow_call:
   workflow_dispatch:
     inputs:
       tags:
@@ -18,9 +41,7 @@ on:
 
 jobs:
   build_ubuntu_22_04:
-    if: ${{ github.actor == 'badabing2005' }}
-    # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout code
@@ -32,15 +53,15 @@ jobs:
           sudo apt install software-properties-common -y
           sudo add-apt-repository ppa:deadsnakes/ppa -y
           sudo apt update
-          sudo apt install -y python3.11
-          sudo apt install -y python3.11-venv
+          sudo apt install -y python3.13
+          sudo apt install -y python3.13-venv
           sudo apt install -y python3-pip
-          python3.11 --version
+          python3.13 --version
 
       - name: Install wxPython prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3.11-dev
+          sudo apt-get install -y python3.13-dev
           sudo apt-get install -y libgtk-3-dev
           sudo apt-get install -y libunwind-dev
           sudo apt-get install -y libgstreamer1.0-dev
@@ -56,11 +77,14 @@ jobs:
 
       - name: Create virtual environment, install dependencies, and build
         run: |
-          python3.11 -m venv myenv
+          python3.13 -m venv myenv
           . myenv/bin/activate
           python --version
           pip install -U pip
           pip install -U six wheel setuptools
+          # Try wxPython 4.2.2 wheel, then 4.2.1 wheel, finally fallback to source if both fail
+          pip install --only-binary wxPython -U -f https://extras.wxpython.org/wxPython4/extras/linux/gtk3/ubuntu-22.04 wxPython==4.2.2 || \
+          pip install --only-binary wxPython -U -f https://extras.wxpython.org/wxPython4/extras/linux/gtk3/ubuntu-22.04 wxPython==4.2.1 || \
           pip install -U -f https://extras.wxpython.org/wxPython4/extras/linux/gtk3/ubuntu-22.04 wxPython
           pip install -r requirements.txt
           python --version && pip freeze
@@ -71,9 +95,8 @@ jobs:
           ls dist
         shell: bash
 
-      # Upload artifacts Ubuntu 22.04 to Actions
+      # Upload artifacts Ubuntu 22.04
       - name: Upload Ubuntu 22.04 Artifact
-        if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }} # Only run this step when running in GitHub Actions
         uses: actions/upload-artifact@v4
         id: upload_artifacts_ubuntu_22_04
         with:
@@ -81,38 +104,3 @@ jobs:
           path: |
             dist/PixelFlasher_Ubuntu_22_04
             dist/PixelFlasher_Ubuntu_22_04.sha256
-
-      # # Copy the artifact to a local directory
-      # - name: Copy Ubuntu 22.04 Artifact locally
-      #   if: ${{ env.ACT }} # Only run this step when not running in GitHub Actions
-      #   run: |
-      #     cp dist/PixelFlasher dist/PixelFlasher_Ubuntu_22_04
-
-      # # Create a release
-      # - name: Create Release
-        # id: create_release
-        # # uses: actions/create-release@v1
-        # uses: ncipollo/release-action@v1.11.1
-        # # env:
-          # # GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # with:
-          # token: ${{ secrets.GITHUB_TOKEN }}
-          # tag: ${{ github.ref }}
-          # # release_name: Release ${{ github.ref }}
-          # # name: Release ${{ github.ref }}
-          # name: Release ${{ github.ref }}
-          # allowUpdates: "true"
-          # draft: false
-          # prerelease: true
-
-      # # Upload the Ubuntu 22.04 artifact to release
-      # - name: Upload Ubuntu 22.04 Artifact to release
-        # uses: shogo82148/actions-upload-release-asset@v1
-        # # uses: actions/upload-release-asset@v1
-        # env:
-          # GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # with:
-          # upload_url: ${{ steps.create_release.outputs.upload_url }}
-          # asset_path: dist/PixelFlasher
-          # asset_name: PixelFlasher_Ubuntu_22_04
-          # asset_content_type: application/zip

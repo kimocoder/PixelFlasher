@@ -1,5 +1,38 @@
 #!/usr/bin/env python
 
+# This file is part of PixelFlasher https://github.com/badabing2005/PixelFlasher
+#
+# Copyright (C) 2025 Badabing2005
+# SPDX-FileCopyrightText: 2025 Badabing2005
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# This program is free software: you can redistribute it and/or modify it under
+# the terms of the GNU Affero General Public License as published by the Free
+# Software Foundation, either version 3 of the License, or (at your option) any
+# later version.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License
+# for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+#
+# Also add information on how to contact you by electronic and paper mail.
+#
+# If your software can interact with users remotely through a computer network,
+# you should also make sure that it provides a way for users to get its source.
+# For example, if your program is a web application, its interface could
+# display a "Source" link that leads users to an archive of the code. There are
+# many ways you could offer source, and different solutions will be better for
+# different programs; see section 13 for the specific requirements.
+#
+# You should also get your employer (if you work as a programmer) or school, if
+# any, to sign a "copyright disclaimer" for the program, if necessary. For more
+# information on this, and how to apply and follow the GNU AGPL, see
+# <https://www.gnu.org/licenses/>.
+
 import contextlib
 import json
 import os
@@ -81,6 +114,11 @@ class Config():
         self.enable_bulk_prop = False
         self.enable_pixel_img_process = False
         self.override_kmi = ''
+        self.keep_temporary_support_files = False
+        self.check_module_updates = True
+        self.show_custom_rom_options = False
+        self.sanitize_support_files = False
+        self.language = 'en'
 
         self.toolbar = {
             'tb_position': 'top',
@@ -93,11 +131,13 @@ class Config():
                 'scrcpy': True,
                 'device_info': True,
                 'partition_manager': True,
+                'pi_analysis_report': True,
                 'switch_slot': True,
                 'reboot_system': True,
                 'reboot_bootloader': True,
                 'reboot_fastbootd': True,
-                'reboot_recovery': True,
+                'reboot_recovery': False,
+                'reboot_recovery_interactive': True,
                 'reboot_safe_mode': True,
                 'reboot_download': True,
                 'reboot_sideload': True,
@@ -121,7 +161,11 @@ class Config():
             'force_first_api': False,
             'first_api_value_when_forced': "25",
             'sort_keys': True,
-            'keep_unknown': True
+            'keep_unknown': True,
+            'spoofBuild': True,
+            'spoofProps': False,
+            'spoofProvider': False,
+            'spoofSignature': False,
         }
 
         self.scrcpy = {
@@ -266,6 +310,16 @@ class Config():
                     conf.enable_pixel_img_process = data['enable_pixel_img_process']
                 with contextlib.suppress(KeyError):
                     conf.override_kmi = data['override_kmi']
+                with contextlib.suppress(KeyError):
+                    conf.keep_temporary_support_files = data['keep_temporary_support_files']
+                with contextlib.suppress(KeyError):
+                    conf.check_module_updates = data['check_module_updates']
+                with contextlib.suppress(KeyError):
+                    conf.show_custom_rom_options = data['show_custom_rom_options']
+                with contextlib.suppress(KeyError):
+                    conf.sanitize_support_files = data['sanitize_support_files']
+                with contextlib.suppress(KeyError):
+                    conf.language = data['language']
 
                 # read the toolbar section
                 with contextlib.suppress(KeyError):
@@ -291,6 +345,8 @@ class Config():
                     with contextlib.suppress(KeyError):
                         conf.toolbar['visible']['partition_manager'] = toolbar_data['visible']['partition_manager']
                     with contextlib.suppress(KeyError):
+                        conf.toolbar['visible']['pi_analysis_report'] = toolbar_data['visible']['pi_analysis_report']
+                    with contextlib.suppress(KeyError):
                         conf.toolbar['visible']['switch_slot'] = toolbar_data['visible']['switch_slot']
                     with contextlib.suppress(KeyError):
                         conf.toolbar['visible']['reboot_system'] = toolbar_data['visible']['reboot_system']
@@ -300,6 +356,8 @@ class Config():
                         conf.toolbar['visible']['reboot_fastbootd'] = toolbar_data['visible']['reboot_fastbootd']
                     with contextlib.suppress(KeyError):
                         conf.toolbar['visible']['reboot_recovery'] = toolbar_data['visible']['reboot_recovery']
+                    with contextlib.suppress(KeyError):
+                        conf.toolbar['visible']['reboot_recovery_interactive'] = toolbar_data['visible']['reboot_recovery_interactive']
                     with contextlib.suppress(KeyError):
                         conf.toolbar['visible']['reboot_safe_mode'] = toolbar_data['visible']['reboot_safe_mode']
                     with contextlib.suppress(KeyError):
@@ -343,6 +401,14 @@ class Config():
                         conf.pif['sort_keys'] = pif_data['sort_keys']
                     with contextlib.suppress(KeyError):
                         conf.pif['keep_unknown'] = pif_data['keep_unknown']
+                    with contextlib.suppress(KeyError):
+                        conf.pif['spoofBuild'] = pif_data['spoofBuild']
+                    with contextlib.suppress(KeyError):
+                        conf.pif['spoofProps'] = pif_data['spoofProps']
+                    with contextlib.suppress(KeyError):
+                        conf.pif['spoofProvider'] = pif_data['spoofProvider']
+                    with contextlib.suppress(KeyError):
+                        conf.pif['spoofSignature'] = pif_data['spoofSignature']
 
                 # read the scrcpy section
                 scrcpy_folder = ''
@@ -366,7 +432,7 @@ class Config():
                 conf.first_run = True
                 conf.first_run_date = f"{datetime.now():%Y-%m-%d %H:%M:%S}"
         except Exception as e:
-            print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: encountered an exception during configuartion file loading.")
+            print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: encountered an exception during configuration file loading.")
             print(f"Exception: {e}")
             print("Deleting the configuration file to recover ...")
             os.remove(file_path)
@@ -443,7 +509,12 @@ class Config():
             'toolbar': self.toolbar,  # Save the toolbar settings as well
             'pif': self.pif,  # Save the pif settings as well
             'scrcpy': self.scrcpy,  # Save the scrcpy settings as well
-            'override_kmi': self.override_kmi
+            'override_kmi': self.override_kmi,
+            'keep_temporary_support_files': self.keep_temporary_support_files,
+            'check_module_updates': self.check_module_updates,
+            'show_custom_rom_options': self.show_custom_rom_options,
+            'sanitize_support_files': self.sanitize_support_files,
+            'language': self.language,
         }
         with open(file_path, 'w', encoding="ISO-8859-1", errors="replace", newline='\n') as f:
             json.dump(data, f, indent=4)
