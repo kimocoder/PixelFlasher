@@ -2582,10 +2582,8 @@ def parse_device_list_html(ul_content):
     Returns:
         tuple: (model_list, product_list)
     """
-    # Load device data from android_devices.json
-    with open('android_devices.json', 'r') as f:
-        device_data = json.load(f)
 
+    device_data = get_android_devices()
     # Create reverse lookup from display name to codename
     device_to_product = {}
     for product, info in device_data.items():
@@ -2840,7 +2838,7 @@ def get_gsi_data(force_version=None):
         return ret_obj, error
 
     except Exception as e:
-        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error while getting partial GSI data.")
+        print(f"\n❌ {datetime.now():%Y-%m-%d %H:%M:%S} ERROR: Encountered an error while getting GSI data.")
         traceback.print_exc()
         return None, None
 
@@ -3465,22 +3463,32 @@ def get_google_images(save_to=None):
                 for row in rows:
                     # Extract the fields from each <tr> element
                     columns = row.find_all('td')
-                    version = columns[0].text.strip()
+                    version = ''
+                    with contextlib.suppress(Exception):
+                        version = columns[0].text.strip()
 
                     # Different extraction is necessary per type
+                    download_url = ''
+                    sha256_checksum = ''
                     if image_type in ['ota', 'ota-watch'] or (marlin_flag and image_type == "factory"):
-                        sha256_checksum = columns[2].text.strip()
-                        download_url = columns[1].find('a')['href']
+                        with contextlib.suppress(Exception):
+                            sha256_checksum = columns[2].text.strip()
+                        with contextlib.suppress(Exception):
+                            download_url = columns[1].find('a')['href']
                     elif image_type in ['factory', 'factory-watch']:
-                        download_url = columns[2].find('a')['href']
-                        sha256_checksum = columns[3].text.strip()
+                        with contextlib.suppress(Exception):
+                            download_url = columns[2].find('a')['href']
+                        with contextlib.suppress(Exception):
+                            sha256_checksum = columns[3].text.strip()
 
-                    date_match = re.search(r'\b(\d{6})\b', version)
-                    date = None
-                    if date_match:
-                        date = date_match[1]
-                    else:
-                        date = extract_date_from_google_version(version)
+                    date = ''
+                    with contextlib.suppress(Exception):
+                        date_match = re.search(r'\b(\d{6})\b', version)
+                        date = None
+                        if date_match:
+                            date = date_match[1]
+                        else:
+                            date = extract_date_from_google_version(version)
 
                     # Create a dictionary for each download
                     download_info = {
@@ -3918,6 +3926,8 @@ def process_dict(the_dict, add_missing_keys=False, pif_flavor='', set_first_api=
                 donor_data["spoofProvider"] = "1" if spoofProvider_value else "0"
                 spoofSignature_value = config.pif.get('spoofSignature', False)
                 donor_data["spoofSignature"] = "1" if spoofSignature_value else "0"
+                spoofVendingSdk_value = config.pif.get('spoofVendingSdk', False)
+                donor_data["spoofVendingSdk"] = "1" if spoofVendingSdk_value else "0"
             if module_versionCode > 7000 and module_flavor != 'trickystore':
                 donor_data["verboseLogs"] = "0"
             # donor_data["*.vndk_version"] = ro_vndk_version
@@ -5236,7 +5246,6 @@ def check_kb(filename):
             if not device_id:
                 print("❌ ERROR: Keybox missing DeviceID attribute")
                 results.append('invalid_structure')
-                continue
             print(f"\nProcessing Keybox {k}/{expected_keyboxes} for Device ID: {device_id}")
 
             # 4. Verify both RSA and ECDSA algorithms are present
@@ -5533,7 +5542,7 @@ def check_kb(filename):
             print(f"\n❌❌❌ Keybox {filename} contains expired certificates!")
             results.append('expired')
         if is_sw_signed or not is_google_signed:
-            print(f"⚠️ Keybox {filename} is software signed! This is not a hardware-backed keybox!")
+            print(f"⚠️ Keybox {filename} is possibly software signed! This is not a hardware-backed keybox!")
             results.append('aosp')
         if expiring_soon:
             print(f"⚠️ Keybox {filename} contains certificates that are expiring soon!")
@@ -6119,7 +6128,7 @@ def get_magisk_apks():
     if _magisk_apks is None:
         try:
             apks = []
-            mlist = ['Magisk Stable', 'Magisk Beta', 'Magisk Canary', 'Magisk Debug', 'KitsuneMagisk Fork', "KernelSU", 'KernelSU-Next', 'APatch', "Magisk zygote64_32 canary", "Magisk special 27001", "Magisk special 26401", 'Magisk special 25203']
+            mlist = ['Magisk Stable', 'Magisk Beta', 'Magisk Debug', 'KitsuneMagisk Fork', "KernelSU", 'KernelSU-Next', 'APatch', "Magisk zygote64_32 canary", "Magisk special 27001", "Magisk special 26401", 'Magisk special 25203']
             for i in mlist:
                 apk = get_magisk_apk_details(i)
                 if apk:

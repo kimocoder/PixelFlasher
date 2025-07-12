@@ -101,6 +101,8 @@ jobs:
           }
 
       - name: Sign Windows ARM64 Executable
+        # Skip signing for pull requests as secrets aren't available
+        if: ${{ github.event_name != 'pull_request' }}
         uses: skymatic/code-sign-action@v3
         with:
           certificate: '${{ secrets.CERTIFICATE }}'
